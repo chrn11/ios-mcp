@@ -28,11 +28,35 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install ldid make
+          brew install ldid make dpkg
           echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
       - name: Install Theos
         uses: Randomblock1/theos-action@v1
+
+      - name: Install libroothide headers for Theos
+        run: |
+          mkdir -p $THEOS/include/roothide
+          mkdir -p $THEOS/lib
+          # Download roothide SDK from GitHub releases
+          curl -fsSL https://github.com/roothide/libroothide/releases/latest/download/roothide-theos.zip -o /tmp/roothide-theos.zip
+          unzip -o /tmp/roothide-theos.zip -d /tmp/roothide-theos
+          cp -r /tmp/roothide-theos/include/roothide/* $THEOS/include/roothide/ 2>/dev/null || true
+          cp /tmp/roothide-theos/include/roothide.h $THEOS/include/ 2>/dev/null || true
+          cp /tmp/roothide-theos/lib/libroothide.dylib $THEOS/lib/ 2>/dev/null || true
+          # Fallback: download individual header files if zip structure differs
+          curl -fsSL https://raw.githubusercontent.com/roothide/libroothide/main/roothide-theos.h -o $THEOS/include/roothide-theos.h 2>/dev/null || true
+          curl -fsSL https://raw.githubusercontent.com/roothide/libroothide/main/stub.h -o $THEOS/include/roothide/stub.h 2>/dev/null || true
+          curl -fsSL https://raw.githubusercontent.com/roothide/libroothide/main/roothide.h -o $THEOS/include/roothide/roothide.h 2>/dev/null || true
+          echo "=== roothide include files ==="
+          ls -la $THEOS/include/roothide/ 2>/dev/null || echo "WARNING: roothide include dir not found"
+
+      - name: Copy vendored libraries to Theos
+        run: |
+          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libcrypto.a $THEOS/lib/ 2>/dev/null || true
+          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libplist-2.0.a $THEOS/lib/ 2>/dev/null || true
+          echo "=== Theos lib ==="
+          ls -la $THEOS/lib/lib*.a 2>/dev/null || true
 
       - name: Build AppSync subprojects
         working-directory: AppSync
