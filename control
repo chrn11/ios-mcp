@@ -6,7 +6,7 @@ Replaces: com.witchan.iphone-mcp
 Depends: mobilesubstrate, preferenceloader
 Version: 1.0.0
 Architecture: iphoneos-arm
-Description: MCP server for AI-driven iOS device control. Supports HID buttons, touch, screenshots, clipboard, app management, accessibility tree, and text input.
+Description: MCP server for AI-driven iOS device control. Supports HID buttons, touch, screenshots, clipboard, app management, accessibility tree, text input, stream_logs, crash reports, tap_element, wait_for_element, respring, reload_tweak, check_injection, read/write_plist.
 Maintainer: witchan
 Author: witchan
 Section: Tweaks

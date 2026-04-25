@@ -172,7 +172,21 @@ static NSDictionary *serializeElement(id element, NSInteger depth, NSInteger max
 
     if ([element respondsToSelector:@selector(accessibilityValue)]) {
         id value = [element accessibilityValue];
-        if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+        // Security: do not expose values of secure text fields (passwords)
+        if ([element isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)element;
+            node[@"secureTextField"] = @(textField.secureTextEntry);
+            if (textField.secureTextEntry) {
+                // Mask the value for secure fields
+                if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+                    node[@"value"] = @"********";
+                }
+            } else if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+                node[@"value"] = value;
+            } else if ([value isKindOfClass:[NSNumber class]]) {
+                node[@"value"] = value;
+            }
+        } else if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
             node[@"value"] = value;
         } else if ([value isKindOfClass:[NSNumber class]]) {
             node[@"value"] = value;

@@ -5,6 +5,7 @@
 #import "AppManager.h"
 #import "AccessibilityManager.h"
 #import "MCPProcessUtil.h"
+#import "MCPInputValidator.h"
 #import "TextInputManager.h"
 #import <UIKit/UIKit.h>
 #import <sys/socket.h>
@@ -870,6 +871,126 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
                 },
                 @"required": @[@"bundle_id"]
             }
+        },
+        // ---- Debug & testing tools ----
+        @{
+            @"name": @"stream_logs",
+            @"description": @"Stream device logs in real-time. Returns log entries as they arrive. "
+                "Filters by process name or subsystem. Essential for debugging tweaks and apps without Xcode.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"filter": @{@"type": @"string", @"description": @"Grep pattern to filter logs (e.g. 'witchan', 'mytweak')"},
+                    @"process": @{@"type": @"string", @"description": @"Only show logs from this process name (e.g. 'SpringBoard')"},
+                    @"level": @{@"type": @"string", @"description": @"Minimum log level: debug/info/default/error/fault"},
+                    @"duration": @{@"type": @"number", @"description": @"How many seconds to capture (default 5, max 30)"},
+                    @"max_lines": @{@"type": @"integer", @"description": @"Maximum lines to return (default 100, max 500)"}
+                }
+            }
+        },
+        @{
+            @"name": @"get_crash_reports",
+            @"description": @"List and read device crash reports. Shows recent crashes for debugging tweaks and apps.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"action": @{@"type": @"string", @"description": @"'list' to see recent crashes, 'read' to get details", @"enum": @[@"list", @"read"]},
+                    @"process": @{@"type": @"string", @"description": @"Filter by process name (e.g. 'SpringBoard')"},
+                    @"report_id": @{@"type": @"string", @"description": @"Specific report ID to read (from list)"},
+                    @"count": @{@"type": @"integer", @"description": @"Number of recent reports to list (default 10)"}
+                },
+                @"required": @[@"action"]
+            }
+        },
+        @{
+            @"name": @"tap_element",
+            @"description": @"Tap a UI element by its accessibility label, identifier, or visible text. "
+                "Much more reliable than coordinate-based tap_screen for testing app flows.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"label": @{@"type": @"string", @"description": @"Accessibility label to match"},
+                    @"identifier": @{@"type": @"string", @"description": @"Accessibility identifier to match"},
+                    @"text": @{@"type": @"string", @"description": @"Visible text to match"},
+                    @"index": @{@"type": @"integer", @"description": @"When multiple matches, click the Nth one (0-based, default 0)"}
+                }
+            }
+        },
+        @{
+            @"name": @"wait_for_element",
+            @"description": @"Wait for a UI element to appear or disappear. "
+                "Blocks until element is found or timeout. Essential for testing async UI like loading screens, alerts, navigation.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"label": @{@"type": @"string", @"description": @"Accessibility label to wait for"},
+                    @"identifier": @{@"type": @"string", @"description": @"Accessibility identifier to wait for"},
+                    @"text": @{@"type": @"string", @"description": @"Visible text to wait for"},
+                    @"timeout": @{@"type": @"number", @"description": @"Seconds to wait (default 10, max 30)"},
+                    @"disappear": @{@"type": @"boolean", @"description": @"Wait for element to disappear instead (default false)"}
+                }
+            }
+        },
+        @{
+            @"name": @"respring",
+            @"description": @"Restart SpringBoard. Equivalent to running 'killall SpringBoard'. "
+                "Use after installing or updating a tweak that affects SpringBoard.",
+            @"inputSchema": @{@"type": @"object", @"properties": @{}}
+        },
+        @{
+            @"name": @"reload_tweak",
+            @"description": @"Reload a tweak in a target process by killing and restarting it. "
+                "Much faster than respring for iterative tweak development. "
+                "For non-SpringBoard processes only.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"dylib": @{@"type": @"string", @"description": @"Dylib name to verify after reload (e.g. 'mytweak.dylib')"},
+                    @"process": @{@"type": @"string", @"description": @"Target process bundle ID (e.g. 'com.apple.mobilesafari')"}
+                },
+                @"required": @[@"process"]
+            }
+        },
+        @{
+            @"name": @"check_injection",
+            @"description": @"Check if a tweak dylib is loaded in a running process. "
+                "Essential for verifying your tweak is actually injected and running.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"dylib": @{@"type": @"string", @"description": @"Dylib name to check (e.g. 'mytweak.dylib')"},
+                    @"process": @{@"type": @"string", @"description": @"Process name or bundle ID (e.g. 'SpringBoard', 'com.apple.mobilesafari')"}
+                },
+                @"required": @[@"dylib"]
+            }
+        },
+        @{
+            @"name": @"read_plist",
+            @"description": @"Read a plist file or preferences domain from the device. "
+                "Useful for checking app preferences, tweak settings, and Info.plist values.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"path": @{@"type": @"string", @"description": @"Path to plist file, or a domain like 'com.witchan.ios-mcp'"},
+                    @"key": @{@"type": @"string", @"description": @"Specific key to read (omit for all keys)"}
+                },
+                @"required": @[@"path"]
+            }
+        },
+        @{
+            @"name": @"write_plist",
+            @"description": @"Write a value to a plist file or preferences domain on the device. "
+                "Useful for changing tweak settings during testing without respring.",
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"path": @{@"type": @"string", @"description": @"Path to plist file or domain"},
+                    @"key": @{@"type": @"string", @"description": @"Key to set"},
+                    @"value": @{@"type": @"string", @"description": @"Value to set (auto-detected as bool/int/string)"},
+                    @"type": @{@"type": @"string", @"description": @"Force type: bool/int/string", @"enum": @[@"bool", @"int", @"string"]}
+                },
+                @"required": @[@"path", @"key", @"value"]
+            }
         }
     ];
 
@@ -997,6 +1118,26 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         return [self executeInstallApp:reqId args:args];
     } else if ([toolName isEqualToString:@"uninstall_app"]) {
         return [self executeUninstallApp:reqId args:args];
+    }
+    // Debug & testing tools
+    else if ([toolName isEqualToString:@"stream_logs"]) {
+        return [self executeStreamLogs:reqId args:args];
+    } else if ([toolName isEqualToString:@"get_crash_reports"]) {
+        return [self executeGetCrashReports:reqId args:args];
+    } else if ([toolName isEqualToString:@"tap_element"]) {
+        return [self executeTapElement:reqId args:args];
+    } else if ([toolName isEqualToString:@"wait_for_element"]) {
+        return [self executeWaitForElement:reqId args:args];
+    } else if ([toolName isEqualToString:@"respring"]) {
+        return [self executeRespring:reqId];
+    } else if ([toolName isEqualToString:@"reload_tweak"]) {
+        return [self executeReloadTweak:reqId args:args];
+    } else if ([toolName isEqualToString:@"check_injection"]) {
+        return [self executeCheckInjection:reqId args:args];
+    } else if ([toolName isEqualToString:@"read_plist"]) {
+        return [self executeReadPlist:reqId args:args];
+    } else if ([toolName isEqualToString:@"write_plist"]) {
+        return [self executeWritePlist:reqId args:args];
     }
     return [self mcpError:reqId code:-32602 message:[NSString stringWithFormat:@"Unknown tool: %@", toolName]];
 }
@@ -1574,6 +1715,12 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         return [self mcpError:reqId code:-32602 message:paramError];
     }
 
+    // Security: validate command against blacklist
+    NSString *blockReason = nil;
+    if (!MCPValidateCommand(command, &blockReason)) {
+        return [self mcpSuccess:reqId text:blockReason isError:YES];
+    }
+
     double timeoutSec = 10;
     if (!MCPNumberFromArgs(args, @"timeout", 10, NO, &timeoutSec, &paramError)) {
         return [self mcpError:reqId code:-32602 message:paramError];
@@ -1815,6 +1962,547 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Uninstalled %@", bundleId]];
     }
     return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Uninstall failed: %@", err ?: @"unknown"] isError:YES];
+}
+
+#pragma mark - Stream Logs Execution
+
+- (NSDictionary *)executeStreamLogs:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *filter = nil;
+    NSString *process = nil;
+    NSString *level = nil;
+    double durationSec = 5;
+    double maxLinesValue = 100;
+
+    if (!MCPStringFromArgs(args, @"filter", NO, &filter, &paramError) ||
+        !MCPStringFromArgs(args, @"process", NO, &process, &paramError) ||
+        !MCPStringFromArgs(args, @"level", NO, &level, &paramError) ||
+        !MCPNumberFromArgs(args, @"duration", 5, NO, &durationSec, &paramError) ||
+        !MCPNumberFromArgs(args, @"max_lines", 100, NO, &maxLinesValue, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+    if (durationSec <= 0) durationSec = 5;
+    if (durationSec > 30) durationSec = 30;
+    NSInteger maxLines = (NSInteger)maxLinesValue;
+    if (maxLines <= 0) maxLines = 100;
+    if (maxLines > 500) maxLines = 500;
+
+    // Build the log stream command
+    NSMutableArray<NSString *> *cmdArgs = [NSMutableArray arrayWithObject:@"stream"];
+    cmdArgs = [NSMutableArray arrayWithArray:@[@"stream", @"--style", @"compact"]];
+
+    if (process.length > 0) {
+        [cmdArgs addObject:@"--process"];
+        [cmdArgs addObject:process];
+    }
+    if (level.length > 0) {
+        [cmdArgs addObject:@"--level"];
+        // Map friendly names to OS log levels
+        NSDictionary *levelMap = @{
+            @"debug": @"debug",
+            @"info": @"info",
+            @"default": @"default",
+            @"error": @"error",
+            @"fault": @"fault"
+        };
+        [cmdArgs addObject:levelMap[level.lowercaseString] ?: level];
+    }
+    [cmdArgs addObject:@"--timeout"];
+    [cmdArgs addObject:[NSString stringWithFormat:@"%.0f", durationSec]];
+
+    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *output = nil;
+    NSString *runError = nil;
+    int exitCode = -1;
+    BOOL finished = MCPRunProcess(shellPath,
+                                  @[@"-lc", [@"log " stringByAppendingString:[cmdArgs componentsJoinedByString:@" "]]],
+                                  MCPJailbreakEnvironment(),
+                                  durationSec + 5,
+                                  256 * 1024,
+                                  &output,
+                                  &exitCode,
+                                  &runError);
+
+    if (!finished) {
+        if (runError.length > 0) {
+            return [self mcpSuccess:reqId text:runError isError:YES];
+        }
+        return [self mcpSuccess:reqId text:@"Log stream timed out" isError:YES];
+    }
+
+    // Parse output lines
+    NSArray<NSString *> *lines = output ? [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] : @[];
+    NSMutableArray<NSDictionary *> *logEntries = [NSMutableArray array];
+
+    NSRegularExpression *filterRegex = nil;
+    if (filter.length > 0) {
+        filterRegex = [NSRegularExpression regularExpressionWithPattern:filter options:NSRegularExpressionCaseInsensitive error:nil];
+    }
+
+    for (NSString *line in lines) {
+        if (line.length == 0) continue;
+        if (logEntries.count >= (NSUInteger)maxLines) break;
+        if (filterRegex && [filterRegex numberOfMatchesInString:line options:0 range:NSMakeRange(0, line.length)] == 0) {
+            continue;
+        }
+        // Parse compact log format: "Timestamp  Process[PID]  Level  Message"
+        // Each line becomes a simple dict with time, message
+        NSDictionary *entry = @{@"message": line};
+        [logEntries addObject:entry];
+    }
+
+    NSMutableDictionary *result = [@{
+        @"lines": @(logEntries.count),
+        @"logs": logEntries
+    } mutableCopy];
+
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    return [self mcpSuccess:reqId text:jsonStr];
+}
+
+#pragma mark - Crash Reports Execution
+
+- (NSDictionary *)executeGetCrashReports:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *action = nil;
+    if (!MCPStringFromArgs(args, @"action", YES, &action, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+
+    NSString *process = nil;
+    NSString *reportId = nil;
+    double countValue = 10;
+    if (!MCPStringFromArgs(args, @"process", NO, &process, &paramError) ||
+        !MCPStringFromArgs(args, @"report_id", NO, &reportId, &paramError) ||
+        !MCPNumberFromArgs(args, @"count", 10, NO, &countValue, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+    NSInteger count = (NSInteger)countValue;
+    if (count <= 0) count = 10;
+    if (count > 50) count = 50;
+
+    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *output = nil;
+    int exitCode = -1;
+    NSString *runError = nil;
+
+    if ([action isEqualToString:@"read"]) {
+        // Read a specific crash report
+        if (reportId.length == 0) {
+            return [self mcpError:reqId code:-32602 message:@"report_id is required for 'read' action"];
+        }
+        // Find the report file
+        NSString *cmd = [NSString stringWithFormat:@"find /var/mobile/Library/Logs/CrashReporter /var/logs/CrashReporter -name '*%@*' 2>/dev/null | head -5", reportId];
+        BOOL finished = MCPRunProcess(shellPath, @[@"-lc", cmd], MCPJailbreakEnvironment(), 10, 64 * 1024, &output, &exitCode, &runError);
+        if (!finished || exitCode != 0 || output.length == 0) {
+            return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Crash report not found: %@", reportId] isError:YES];
+        }
+        // Read the first matching file
+        NSString *filePath = [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]].firstObject;
+        filePath = [filePath stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (filePath.length == 0) {
+            return [self mcpSuccess:reqId text:@"Crash report file not found" isError:YES];
+        }
+        cmd = [NSString stringWithFormat:@"head -200 '%@'", filePath];
+        finished = MCPRunProcess(shellPath, @[@"-lc", cmd], MCPJailbreakEnvironment(), 10, 128 * 1024, &output, &exitCode, &runError);
+        if (finished && output.length > 0) {
+            return [self mcpSuccess:reqId text:output];
+        }
+        return [self mcpSuccess:reqId text:@"Failed to read crash report" isError:YES];
+    }
+
+    // Default: list crash reports
+    NSString *cmd = @"ls -t /var/mobile/Library/Logs/CrashReporter/*.ips /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*.ips 2>/dev/null | head -50";
+    if (process.length > 0) {
+        cmd = [NSString stringWithFormat:@"ls -t /var/mobile/Library/Logs/CrashReporter/*%@* /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*%@"* 2>/dev/null | head -%ld", process, process, (long)count];
+    } else {
+        cmd = [NSString stringWithFormat:@"ls -t /var/mobile/Library/Logs/CrashReporter/*.ips /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*.ips 2>/dev/null | head -%ld", (long)count];
+    }
+
+    BOOL finished = MCPRunProcess(shellPath, @[@"-lc", cmd], MCPJailbreakEnvironment(), 10, 64 * 1024, &output, &exitCode, &runError);
+    if (!finished || output.length == 0) {
+        return [self mcpSuccess:reqId text:@"No crash reports found" isError:YES];
+    }
+    return [self mcpSuccess:reqId text:output];
+}
+
+#pragma mark - Tap Element Execution
+
+- (NSDictionary *)executeTapElement:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *label = nil;
+    NSString *identifier = nil;
+    NSString *text = nil;
+    double indexValue = 0;
+
+    if (!MCPStringFromArgs(args, @"label", NO, &label, &paramError) ||
+        !MCPStringFromArgs(args, @"identifier", NO, &identifier, &paramError) ||
+        !MCPStringFromArgs(args, @"text", NO, &text, &paramError) ||
+        !MCPNumberFromArgs(args, @"index", 0, NO, &indexValue, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+    NSInteger index = (NSInteger)indexValue;
+
+    if (label.length == 0 && identifier.length == 0 && text.length == 0) {
+        return [self mcpError:reqId code:-32602 message:@"At least one of 'label', 'identifier', or 'text' must be provided"];
+    }
+
+    // Get UI tree and search for matching element
+    __block NSDictionary *tree = nil;
+    __block NSString *treeError = nil;
+    dispatch_semaphore_t treeSem = dispatch_semaphore_create(0);
+
+    [[AccessibilityManager sharedInstance] getUIElementsWithMaxDepth:20 maxElements:3000 completion:^(NSDictionary *result, NSString *error) {
+        tree = result;
+        treeError = error;
+        dispatch_semaphore_signal(treeSem);
+    }];
+    dispatch_semaphore_wait(treeSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+
+    if (!tree) {
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Failed to get UI tree: %@", treeError ?: @"timeout"] isError:YES];
+    }
+
+    // Search the tree for matching element
+    NSMutableArray<NSDictionary *> *matches = [NSMutableArray array];
+    [self searchElementTree:tree forLabel:label identifier:identifier text:text matches:matches];
+
+    if (matches.count == 0) {
+        return [self mcpSuccess:reqId text:@"No matching element found" isError:YES];
+    }
+
+    if (index >= (NSInteger)matches.count) {
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Index %ld out of range (%lu matches found)", (long)index, (unsigned long)matches.count] isError:YES];
+    }
+
+    NSDictionary *target = matches[index];
+    NSDictionary *frame = target[@"frame"];
+    if (!frame) {
+        return [self mcpSuccess:reqId text:@"Matched element has no frame coordinates" isError:YES];
+    }
+
+    double x = [frame[@"x"] doubleValue] + [frame[@"width"] doubleValue] / 2.0;
+    double y = [frame[@"y"] doubleValue] + [frame[@"height"] doubleValue] / 2.0;
+    CGPoint point = CGPointMake(x, y);
+
+    // Perform the tap using HIDManager
+    __block BOOL ok = NO;
+    __block NSString *err = nil;
+    dispatch_semaphore_t tapSem = dispatch_semaphore_create(0);
+
+    [[IOSMCPHIDManager sharedInstance] tapAtPoint:point completion:^(BOOL success, NSString *error) {
+        ok = success;
+        err = error;
+        dispatch_semaphore_signal(tapSem);
+    }];
+    dispatch_semaphore_wait(tapSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+
+    if (ok) {
+        NSString *matchDesc = label ?: identifier ?: text;
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Tapped element '%@' at (%.1f, %.1f)", matchDesc, point.x, point.y]];
+    }
+    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Tap failed: %@", err ?: @"timeout"] isError:YES];
+}
+
+- (void)searchElementTree:(NSDictionary *)node forLabel:(NSString *)label identifier:(NSString *)identifier text:(NSString *)text matches:(NSMutableArray<NSDictionary *> *)matches {
+    if (!node || ![node isKindOfClass:[NSDictionary class]]) return;
+
+    BOOL labelMatch = label.length == 0 || [node[@"label"] isEqualToString:label];
+    BOOL identifierMatch = identifier.length == 0 || [node[@"identifier"] isEqualToString:identifier];
+    BOOL textMatch = text.length == 0 || [node[@"label"] isEqualToString:text] || [node[@"value"] isEqualToString:text] || [node[@"title"] isEqualToString:text];
+
+    if (labelMatch && identifierMatch && textMatch) {
+        // At least one filter must be actively matching
+        if (label.length > 0 || identifier.length > 0 || text.length > 0) {
+            [matches addObject:node];
+        }
+    }
+
+    NSArray *children = node[@"children"];
+    for (NSDictionary *child in children) {
+        [self searchElementTree:child forLabel:label identifier:identifier text:text matches:matches];
+    }
+}
+
+#pragma mark - Wait For Element Execution
+
+- (NSDictionary *)executeWaitForElement:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *label = nil;
+    NSString *identifier = nil;
+    NSString *text = nil;
+    double timeoutSec = 10;
+    double disappearValue = 0;
+
+    if (!MCPStringFromArgs(args, @"label", NO, &label, &paramError) ||
+        !MCPStringFromArgs(args, @"identifier", NO, &identifier, &paramError) ||
+        !MCPStringFromArgs(args, @"text", NO, &text, &paramError) ||
+        !MCPNumberFromArgs(args, @"timeout", 10, NO, &timeoutSec, &paramError) ||
+        !MCPNumberFromArgs(args, @"disappear", 0, NO, &disappearValue, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+    BOOL disappear = disappearValue > 0.5;
+
+    if (label.length == 0 && identifier.length == 0 && text.length == 0) {
+        return [self mcpError:reqId code:-32602 message:@"At least one of 'label', 'identifier', or 'text' must be provided"];
+    }
+    if (timeoutSec <= 0) timeoutSec = 10;
+    if (timeoutSec > 30) timeoutSec = 30;
+
+    NSTimeInterval startTime = [[NSDate date] timeIntervalSince1970];
+    NSTimeInterval deadline = startTime + timeoutSec;
+
+    while ([[NSDate date] timeIntervalSince1970] < deadline) {
+        __block NSDictionary *tree = nil;
+        __block NSString *treeError = nil;
+        dispatch_semaphore_t treeSem = dispatch_semaphore_create(0);
+
+        [[AccessibilityManager sharedInstance] getUIElementsWithMaxDepth:10 maxElements:2000 completion:^(NSDictionary *result, NSString *error) {
+            tree = result;
+            treeError = error;
+            dispatch_semaphore_signal(treeSem);
+        }];
+        dispatch_semaphore_wait(treeSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+
+        if (tree) {
+            NSMutableArray<NSDictionary *> *matches = [NSMutableArray array];
+            [self searchElementTree:tree forLabel:label identifier:identifier text:text matches:matches];
+
+            if (!disappear && matches.count > 0) {
+                NSDictionary *found = matches[0];
+                NSString *matchDesc = label ?: identifier ?: text;
+                return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Element '%@' found after %.1fs", matchDesc, [[NSDate date] timeIntervalSince1970] - startTime]];
+            }
+
+            if (disappear && matches.count == 0) {
+                NSString *matchDesc = label ?: identifier ?: text;
+                return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Element '%@' disappeared after %.1fs", matchDesc, [[NSDate date] timeIntervalSince1970] - startTime]];
+            }
+        }
+
+        // Wait 500ms before next check
+        [NSThread sleepForTimeInterval:0.5];
+    }
+
+    NSString *matchDesc = label ?: identifier ?: text;
+    if (disappear) {
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Element '%@' did not disappear within %.0fs", matchDesc, timeoutSec] isError:YES];
+    }
+    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Element '%@' not found within %.0fs", matchDesc, timeoutSec] isError:YES];
+}
+
+#pragma mark - Respring Execution
+
+- (NSDictionary *)executeRespring:(id)reqId {
+    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *output = nil;
+    int exitCode = -1;
+    NSString *runError = nil;
+
+    // Use killall SpringBoard which triggers a respring
+    BOOL finished = MCPRunProcess(shellPath, @[@"-lc", @"killall SpringBoard"], MCPJailbreakEnvironment(), 5, 4096, &output, &exitCode, &runError);
+
+    // killall SpringBoard will disconnect us, so just report success
+    (void)finished;
+    (void)exitCode;
+
+    return [self mcpSuccess:reqId text:@"Respring triggered (killall SpringBoard)"];
+}
+
+#pragma mark - Reload Tweak Execution
+
+- (NSDictionary *)executeReloadTweak:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *process = nil;
+    NSString *dylib = nil;
+
+    if (!MCPStringFromArgs(args, @"process", YES, &process, &paramError) ||
+        !MCPStringFromArgs(args, @"dylib", NO, &dylib, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+
+    // Kill the target app (it will be relaunched by system or user)
+    NSString *err = nil;
+    BOOL ok = [[AppManager sharedInstance] killApp:process error:&err];
+
+    if (!ok) {
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Failed to kill %@: %@", process, err ?: @"unknown"] isError:YES];
+    }
+
+    // If dylib verification is requested, wait a bit then check
+    if (dylib.length > 0) {
+        [NSThread sleepForTimeInterval:1.0];
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Killed %@ for tweak reload. Verify '%@' injection with check_injection after reopening the app", process, dylib]];
+    }
+
+    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Killed %@ for tweak reload. Reopen the app to reload injected dylibs", process]];
+}
+
+#pragma mark - Check Injection Execution
+
+- (NSDictionary *)executeCheckInjection:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *dylib = nil;
+    NSString *process = nil;
+
+    if (!MCPStringFromArgs(args, @"dylib", YES, &dylib, &paramError) ||
+        !MCPStringFromArgs(args, @"process", NO, &process, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+
+    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *output = nil;
+    int exitCode = -1;
+    NSString *runError = nil;
+
+    // Find the process PID(s)
+    NSString *cmd = nil;
+    if (process.length > 0) {
+        // Check if process is a bundle ID — find the binary name
+        NSString *findCmd = [NSString stringWithFormat:@"ps -eo pid,comm | grep -i '%@' | grep -v grep | head -5", process];
+        BOOL finished = MCPRunProcess(shellPath, @[@"-lc", findCmd], MCPJailbreakEnvironment(), 10, 32 * 1024, &output, &exitCode, &runError);
+        if (!finished || output.length == 0) {
+            // Try finding by bundle ID path
+            findCmd = [NSString stringWithFormat:@"ps -eo pid,comm | grep -i '%@' | grep -v grep | head -5", [process lastPathComponent]];
+            MCPRunProcess(shellPath, @[@"-lc", findCmd], MCPJailbreakEnvironment(), 10, 32 * 1024, &output, &exitCode, &runError);
+        }
+
+        if (output.length == 0) {
+            return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Process '%@' not found or not running", process] isError:YES];
+        }
+    }
+
+    // Get PID list — if process was specified we already have the ps output
+    if (process.length > 0) {
+        // Search for dylib in the process's memory maps
+        cmd = [NSString stringWithFormat:@"for pid in $(ps -eo pid,comm | grep -i '%@' | grep -v grep | awk '{print $1}' | head -5); do echo \"--- PID $pid ---\"; cat /proc/$pid/maps 2>/dev/null | grep -i '%@' || vmmap $pid 2>/dev/null | grep -i '%@' || echo 'Could not read maps for PID '$pid; done", [process lastPathComponent], dylib, dylib];
+    } else {
+        // Search across all processes
+        cmd = [NSString stringWithFormat:@"ps -eo pid,comm | tail -n +2 | while read pid comm; do if cat /proc/$pid/maps 2>/dev/null | grep -qi '%@'; then echo \"PID $pid ($comm): YES\"; fi; done; echo '---'; ls /Library/MobileSubstrate/DynamicLibraries/%@* /usr/lib/%@* 2>/dev/null || echo 'Dylib not found in Substrate directories'", dylib, dylib, dylib];
+    }
+
+    BOOL finished = MCPRunProcess(shellPath, @[@"-lc", cmd], MCPJailbreakEnvironment(), 15, 64 * 1024, &output, &exitCode, &runError);
+
+    if (finished && output.length > 0) {
+        // Also check if dylib file exists on filesystem
+        NSString *fsCmd = [NSString stringWithFormat:@"ls -la /Library/MobileSubstrate/DynamicLibraries/%@* /usr/lib/%@* 2>/dev/null; echo '---'; find /Library/MobileSubstrate/DynamicLibraries -name '%@*' 2>/dev/null | head -5", dylib, dylib, dylib];
+        NSString *fsOutput = nil;
+        MCPRunProcess(shellPath, @[@"-lc", fsCmd], MCPJailbreakEnvironment(), 10, 16 * 1024, &fsOutput, &exitCode, &runError);
+
+        NSString *fullOutput = [output stringByAppendingString:@"\n\n--- Dylib file check ---\n"];
+        fullOutput = [fullOutput stringByAppendingString:fsOutput ?: @"(no results)"];
+        return [self mcpSuccess:reqId text:fullOutput];
+    }
+
+    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Failed to check injection for '%@': %@", dylib, runError ?: @"no output"] isError:YES];
+}
+
+#pragma mark - Read/Write Plist Execution
+
+- (NSDictionary *)executeReadPlist:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *path = nil;
+    NSString *key = nil;
+
+    if (!MCPStringFromArgs(args, @"path", YES, &path, &paramError) ||
+        !MCPStringFromArgs(args, @"key", NO, &key, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+
+    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *output = nil;
+    int exitCode = -1;
+    NSString *runError = nil;
+    NSString *cmd = nil;
+
+    // Determine if path looks like a domain (no /) or a file path
+    if (![path containsString:@"/"] && ![path hasSuffix:@".plist"]) {
+        // Assume it's a defaults domain
+        if (key.length > 0) {
+            cmd = [NSString stringWithFormat:@"defaults read '%@' '%@' 2>&1", path, key];
+        } else {
+            cmd = [NSString stringWithFormat:@"defaults read '%@' 2>&1", path];
+        }
+    } else {
+        // It's a file path
+        NSString *resolvedPath = path;
+        if (key.length > 0) {
+            cmd = [NSString stringWithFormat:@"plutil -extract '%@' json -o - '%@' 2>&1 || defaults read '%@' '%@' 2>&1", key, resolvedPath, resolvedPath, key];
+        } else {
+            cmd = [NSString stringWithFormat:@"plutil -convert json -o - '%@' 2>&1", resolvedPath];
+        }
+    }
+
+    BOOL finished = MCPRunProcess(shellPath, @[@"-lc", cmd], MCPJailbreakEnvironment(), 10, 256 * 1024, &output, &exitCode, &runError);
+    if (finished && output.length > 0) {
+        return [self mcpSuccess:reqId text:output];
+    }
+    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Failed to read plist: %@", runError ?: @"unknown error"] isError:YES];
+}
+
+- (NSDictionary *)executeWritePlist:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    NSString *path = nil;
+    NSString *key = nil;
+    NSString *value = nil;
+    NSString *type = nil;
+
+    if (!MCPStringFromArgs(args, @"path", YES, &path, &paramError) ||
+        !MCPStringFromArgs(args, @"key", YES, &key, &paramError) ||
+        !MCPStringFromArgs(args, @"value", YES, &value, &paramError) ||
+        !MCPStringFromArgs(args, @"type", NO, &type, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+
+    // Auto-detect type if not specified
+    NSString *writeType = type;
+    if (writeType.length == 0) {
+        if ([value isEqualToString:@"true"] || [value isEqualToString:@"false"] ||
+            [value isEqualToString:@"YES"] || [value isEqualToString:@"NO"]) {
+            writeType = @"bool";
+        } else {
+            NSRegularExpression *numRegex = [NSRegularExpression regularExpressionWithPattern:@"^-?\\d+$" options:0 error:nil];
+            if ([numRegex numberOfMatchesInString:value options:0 range:NSMakeRange(0, value.length)] > 0) {
+                writeType = @"int";
+            } else {
+                writeType = @"string";
+            }
+        }
+    }
+
+    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *output = nil;
+    int exitCode = -1;
+    NSString *runError = nil;
+    NSString *cmd = nil;
+
+    // Determine if path is domain or file
+    if (![path containsString:@"/"] && ![path hasSuffix:@".plist"]) {
+        // defaults domain
+        NSString *typeFlag = @"-string";
+        if ([writeType isEqualToString:@"bool"]) typeFlag = @"-bool";
+        else if ([writeType isEqualToString:@"int"]) typeFlag = @"-int";
+
+        NSString *escapedValue = [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+        cmd = [NSString stringWithFormat:@"defaults write '%@' '%@' %@ '%@' 2>&1", path, key, typeFlag, escapedValue];
+    } else {
+        // plist file — use PlistBuddy
+        NSString *typeFlag = @"string";
+        if ([writeType isEqualToString:@"bool"]) typeFlag = @"bool";
+        else if ([writeType isEqualToString:@"int"]) typeFlag = @"integer";
+
+        NSString *escapedValue = [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+        cmd = [NSString stringWithFormat:@"/usr/libexec/PlistBuddy -c 'Set :%@ %@' '%@' 2>&1 || /usr/libexec/PlistBuddy -c 'Add :%@ %@ %@' '%@' 2>&1", key, escapedValue, path, key, typeFlag, escapedValue, path];
+    }
+
+    BOOL finished = MCPRunProcess(shellPath, @[@"-lc", cmd], MCPJailbreakEnvironment(), 10, 32 * 1024, &output, &exitCode, &runError);
+    if (finished && exitCode == 0) {
+        return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Set %@ = %@ (type: %@) in %@", key, value, writeType, path]];
+    }
+
+    NSString *errorMsg = output.length > 0 ? output : (runError ?: @"unknown error");
+    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Failed to write plist: %@", errorMsg] isError:YES];
 }
 
 #pragma mark - Response Builders

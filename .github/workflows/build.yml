@@ -1,0 +1,72 @@
+name: Build iOS MCP
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        scheme: [rootful, rootless, roothide]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          brew install ldid make
+          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Install Theos
+        uses: Randomblock1/theos-action@v1
+
+      - name: Build AppSync subprojects
+        working-directory: AppSync
+        env:
+          THEOS_PACKAGE_SCHEME: ${{ matrix.scheme }}
+        run: |
+          make clean || true
+          make package THEOS_PACKAGE_SCHEME=${{ matrix.scheme }} || echo "AppSync build had issues, continuing..."
+
+      - name: Build mcp-root
+        working-directory: mcp-root
+        env:
+          THEOS_PACKAGE_SCHEME: ${{ matrix.scheme }}
+        run: make package THEOS_PACKAGE_SCHEME=${{ matrix.scheme }}
+
+      - name: Build mcp-roothelper
+        working-directory: mcp-roothelper
+        env:
+          THEOS_PACKAGE_SCHEME: ${{ matrix.scheme }}
+        run: make package THEOS_PACKAGE_SCHEME=${{ matrix.scheme }}
+
+      - name: Build mcp-ldid
+        working-directory: mcp-ldid
+        env:
+          THEOS_PACKAGE_SCHEME: ${{ matrix.scheme }}
+        run: make package THEOS_PACKAGE_SCHEME=${{ matrix.scheme }}
+
+      - name: Build ios-mcp (${{ matrix.scheme }})
+        env:
+          THEOS_PACKAGE_SCHEME: ${{ matrix.scheme }}
+        run: |
+          make clean
+          make package THEOS_PACKAGE_SCHEME=${{ matrix.scheme }}
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-mcp-${{ matrix.scheme }}
+          path: |
+            packages/*.deb
+          if-no-files-found: error

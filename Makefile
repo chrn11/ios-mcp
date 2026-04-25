@@ -13,7 +13,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = ios-mcp ios-mcp-helper
 BUNDLE_NAME = iosmcpprefs
 
-ios-mcp_FILES = Tweak.x MCPServer.m HIDManager.m ScreenManager.m ClipboardManager.m AppManager.m AccessibilityManager.m TextInputManager.m MCPProcessUtil.m
+ios-mcp_FILES = Tweak.x MCPServer.m HIDManager.m ScreenManager.m ClipboardManager.m AppManager.m AccessibilityManager.m TextInputManager.m MCPProcessUtil.m MCPInputValidator.m
 ios-mcp_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations
 ios-mcp_FRAMEWORKS = IOKit UIKit CoreGraphics QuartzCore MobileCoreServices AVFoundation Security
 
@@ -36,18 +36,20 @@ iosmcpprefs_INSTALL_PATH = /Library/PreferenceBundles
 iosmcpprefs_RESOURCE_DIRS = prefs/Resources
 iosmcpprefs_USE_MODULES = 0
 
-# ollvm相关配置
-OLLVMNAME = LLVM19.0.0git
-TARGET_CC = /Applications/Xcode.app/Contents/Developer/Toolchains/$(OLLVMNAME).xctoolchain/usr/bin/clang
-TARGET_CXX = /Applications/Xcode.app/Contents/Developer/Toolchains/$(OLLVMNAME).xctoolchain/usr/bin/clang++
-TARGET_LD = /Applications/Xcode.app/Contents/Developer/Toolchains/$(OLLVMNAME).xctoolchain/usr/bin/clang++
-OLLVMPASS = -mllvm -enable-bcfobf -mllvm -enable-cffobf -mllvm -enable-splitobf -mllvm -enable-subobf -mllvm -enable-indibran -mllvm -enable-strcry -mllvm -enable-funcwra -mllvm -enable-fco
+# ollvm相关配置（仅在 OLLVM_TOOLCHAIN 环境变量指向有效路径时启用）
 ios-mcp_USE_MODULES = 0
 ios-mcp-helper_USE_MODULES = 0
-ios-mcp_CFLAGS += $(OLLVMPASS)
-ios-mcp_CXXFLAGS += $(OLLVMPASS)
-ios-mcp-helper_CFLAGS += $(OLLVMPASS)
-ios-mcp-helper_CXXFLAGS += $(OLLVMPASS)
+ifdef OLLVM_TOOLCHAIN
+    OLLVMNAME = LLVM19.0.0git
+    TARGET_CC = $(OLLVM_TOOLCHAIN)/usr/bin/clang
+    TARGET_CXX = $(OLLVM_TOOLCHAIN)/usr/bin/clang++
+    TARGET_LD = $(OLLVM_TOOLCHAIN)/usr/bin/clang++
+    OLLVMPASS = -mllvm -enable-bcfobf -mllvm -enable-cffobf -mllvm -enable-splitobf -mllvm -enable-subobf -mllvm -enable-indibran -mllvm -enable-strcry -mllvm -enable-funcwra -mllvm -enable-fco
+    ios-mcp_CFLAGS += $(OLLVMPASS)
+    ios-mcp_CXXFLAGS += $(OLLVMPASS)
+    ios-mcp-helper_CFLAGS += $(OLLVMPASS)
+    ios-mcp-helper_CXXFLAGS += $(OLLVMPASS)
+endif
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/bundle.mk

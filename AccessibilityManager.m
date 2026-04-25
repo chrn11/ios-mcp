@@ -286,7 +286,15 @@ static NSDictionary *MCPSerializeRemoteElement(AXUIElementRef element,
     node[@"role"] = role ?: @"AXElement";
     if (subrole.length > 0) node[@"subrole"] = subrole;
     if (label.length > 0) node[@"label"] = label;
-    if (value.length > 0) node[@"value"] = value;
+    // Security: mask values of secure text fields
+    id secureEntryAttr = MCPAXCopyAttributeObject(element, kAXSecureAttribute, NULL);
+    BOOL isSecure = [secureEntryAttr boolValue];
+    if (isSecure) {
+        node[@"secureTextField"] = @YES;
+        if (value.length > 0) node[@"value"] = @"********";
+    } else {
+        if (value.length > 0) node[@"value"] = value;
+    }
     if (title.length > 0) node[@"title"] = title;
     if (desc.length > 0) node[@"description"] = desc;
     if (identifier.length > 0) node[@"identifier"] = identifier;

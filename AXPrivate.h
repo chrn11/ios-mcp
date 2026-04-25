@@ -65,6 +65,7 @@ typedef AXError (*AXUIElementCopyElementAtPositionFunc)(AXUIElementRef applicati
 #define kAXTraitsAttribute         CFSTR("AXTraits")
 #define kAXFocusedAttribute        CFSTR("AXFocused")
 #define kAXSelectedAttribute       CFSTR("AXSelected")
+#define kAXSecureAttribute         CFSTR("AXSecure")
 
 #ifdef __cplusplus
 }
