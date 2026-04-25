@@ -28,56 +28,69 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install ldid make dpkg
+          brew install ldid make dpkg cmake
           echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
       - name: Install Theos
         uses: Randomblock1/theos-action@v1
 
-      - name: Install libroothide headers for Theos
+      - name: Install libroothide and libzip for Theos
         run: |
-          mkdir -p $THEOS/include/roothide
-          mkdir -p $THEOS/lib
-          # Clone libroothide to get headers
+          set -e
+          THEOS_INC="$THEOS/include"
+          THEOS_LIB="$THEOS/lib"
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          echo "=== Installing libroothide headers ==="
+          mkdir -p "$THEOS_INC/roothide"
+          mkdir -p "$THEOS_LIB"
           git clone --depth=1 https://github.com/roothide/libroothide.git /tmp/libroothide
-          # Install headers - for non-roothide builds, stub.h provides jbroot() compatibility
-          cp /tmp/libroothide/roothide-theos.h $THEOS/include/roothide-theos.h
-          cp /tmp/libroothide/stub.h $THEOS/include/roothide/stub.h
-          cp /tmp/libroothide/roothide.h $THEOS/include/roothide/roothide.h
-          # Copy all header files from the repo
-          for f in /tmp/libroothide/*.h; do cp "$f" $THEOS/include/roothide/; done
-          # Create top-level roothide.h that includes the stub (for rootful/rootless builds)
-          cat > $THEOS/include/roothide.h << 'HEADER'
-          #ifndef ROOTHIDE_H_GUARD
-          #define ROOTHIDE_H_GUARD
-          #include <roothide/stub.h>
-          #endif
-          HEADER
-          # Build a minimal libroothide stub library for linking (jbroot just returns path unchanged)
-          cat > /tmp/roothide_stub.c << 'STUB'
+          cp /tmp/libroothide/roothide-theos.h "$THEOS_INC/roothide-theos.h"
+          cp /tmp/libroothide/stub.h "$THEOS_INC/roothide/stub.h"
+          cp /tmp/libroothide/roothide.h "$THEOS_INC/roothide/roothide.h"
+          for f in /tmp/libroothide/*.h; do cp "$f" "$THEOS_INC/roothide/"; done
+          # Top-level roothide.h using stub (compatible with rootful/rootless)
+          printf '%s\n' '#ifndef ROOTHIDE_H_GUARD' '#define ROOTHIDE_H_GUARD' '#include <roothide/stub.h>' '#endif' > "$THEOS_INC/roothide.h"
+          # Build libroothide stub
+          cat > /tmp/roothide_stub.c << 'STUBEOF'
           #include <stdlib.h>
           #include <string.h>
           const char* jbroot(const char* path) { return path ? path : ""; }
           void* _jbroot_ptr = NULL;
-          STUB
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk")
-          clang -arch arm64 -arch arm64e -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 -c /tmp/roothide_stub.c -o /tmp/roothide_stub_arm64.o 2>/dev/null || true
-          ar rcs $THEOS/lib/libroothide.a /tmp/roothide_stub_arm64.o 2>/dev/null || true
-          echo "=== roothide include files ==="
-          ls -la $THEOS/include/roothide/ 2>/dev/null || echo "WARNING: roothide include dir not found"
-          ls -la $THEOS/include/roothide.h 2>/dev/null || echo "WARNING: roothide.h not found"
-          echo "=== roothide lib files ==="
-          ls -la $THEOS/lib/libroothide* 2>/dev/null || echo "WARNING: libroothide not found"
-
-      - name: Copy vendored libraries to Theos
-        run: |
-          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libcrypto.a $THEOS/lib/ 2>/dev/null || true
-          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libplist-2.0.a $THEOS/lib/ 2>/dev/null || true
-          # Also need libzip.a for mcp-roothelper
-          # Check if it exists in the Procursus SDK or elsewhere
-          find third_party -name "libzip.a" -exec cp {} $THEOS/lib/ \; 2>/dev/null || true
+          STUBEOF
+          clang -arch arm64 -arch arm64e -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 -c /tmp/roothide_stub.c -o /tmp/roothide_stub.o
+          ar rcs "$THEOS_LIB/libroothide.a" /tmp/roothide_stub.o
+          
+          echo "=== Building libzip from source ==="
+          curl -fsSL https://libzip.org/download/libzip-1.10.1.tar.gz -o /tmp/libzip.tar.gz
+          tar xzf /tmp/libzip.tar.gz -C /tmp
+          cd /tmp/libzip-1.10.1
+          mkdir build && cd build
+          cmake .. \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;arm64e" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_C_FLAGS="-isysroot $SDK_PATH -miphoneos-version-min=13.0" \
+            -DCMAKE_CXX_FLAGS="-isysroot $SDK_PATH -miphoneos-version-min=13.0" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TOOLS=OFF \
+            -DENABLE_BZIP2=OFF \
+            -DENABLE_LZMA=OFF \
+            -DENABLE_ZSTD=OFF \
+            -DENABLE_GNUTLS=OFF \
+            -DENABLE_OPENSSL=OFF \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libzip-install
+          make -j$(sysctl -n hw.ncpu)
+          cp lib/libzip.a "$THEOS_LIB/libzip.a"
+          
+          echo "=== Copying vendored libraries ==="
+          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libcrypto.a "$THEOS_LIB/"
+          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libplist-2.0.a "$THEOS_LIB/"
+          
           echo "=== Theos lib ==="
-          ls -la $THEOS/lib/lib*.a 2>/dev/null || true
+          ls -la "$THEOS_LIB"/lib*.a
+          echo "=== roothide headers ==="
+          ls -la "$THEOS_INC/roothide/"
 
       - name: Build AppSync subprojects
         working-directory: AppSync
