@@ -84,8 +84,8 @@ jobs:
           cp lib/libzip.a "$THEOS_LIB/libzip.a"
           
           echo "=== Copying vendored libraries ==="
-          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libcrypto.a "$THEOS_LIB/"
-          cp third_party/procursus-sdk/iphoneos-arm64/usr/lib/libplist-2.0.a "$THEOS_LIB/"
+          cp "$GITHUB_WORKSPACE/third_party/procursus-sdk/iphoneos-arm64/usr/lib/libcrypto.a" "$THEOS_LIB/"
+          cp "$GITHUB_WORKSPACE/third_party/procursus-sdk/iphoneos-arm64/usr/lib/libplist-2.0.a" "$THEOS_LIB/"
           
           echo "=== Theos lib ==="
           ls -la "$THEOS_LIB"/lib*.a
