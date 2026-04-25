@@ -2115,7 +2115,7 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
     // Default: list crash reports
     NSString *cmd = @"ls -t /var/mobile/Library/Logs/CrashReporter/*.ips /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*.ips 2>/dev/null | head -50";
     if (process.length > 0) {
-        cmd = [NSString stringWithFormat:@"ls -t /var/mobile/Library/Logs/CrashReporter/*%@* /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*%@"* 2>/dev/null | head -%ld", process, process, (long)count];
+        cmd = [NSString stringWithFormat:@"ls -t /var/mobile/Library/Logs/CrashReporter/*%@* /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*%@* 2>/dev/null | head -%ld", process, process, (long)count];
     } else {
         cmd = [NSString stringWithFormat:@"ls -t /var/mobile/Library/Logs/CrashReporter/*.ips /var/mobile/Library/Logs/CrashReporter/DiagnosticLogs/*/*.ips 2>/dev/null | head -%ld", (long)count];
     }
@@ -2270,7 +2270,6 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
             [self searchElementTree:tree forLabel:label identifier:identifier text:text matches:matches];
 
             if (!disappear && matches.count > 0) {
-                NSDictionary *found = matches[0];
                 NSString *matchDesc = label ?: identifier ?: text;
                 return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Element '%@' found after %.1fs", matchDesc, [[NSDate date] timeIntervalSince1970] - startTime]];
             }
