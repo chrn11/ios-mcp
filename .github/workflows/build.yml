@@ -44,16 +44,20 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
           echo "=== Patching Theos for roothide scheme ==="
-          # Debug: find the actual rootless module path
-          echo "THEOS=$THEOS"
-          find "$THEOS" -maxdepth 3 -type d -name rootless 2>/dev/null || echo "no rootless dir found"
-          # Create roothide module dir
-          mkdir -p "$THEOS/mod/roothide" "$THEOS/vendor/roothide" 2>/dev/null || true
-          # Copy rootless module content to roothide (substrate libs etc.)
+          # Copy rootless module content to roothide so Theos accepts the scheme and provides link libs
           for d in $(find "$THEOS" -maxdepth 3 -type d -name rootless 2>/dev/null); do
             target="${d%rootless}roothide"
             echo "Copying $d -> $target"
             cp -a "$d" "$target"
+          done
+          # Ensure substrate library is reachable in roothide module dir
+          for d in $(find "$THEOS" -maxdepth 3 -type d -name roothide 2>/dev/null); do
+            if [ ! -f "$d/libsubstrate.dylib" ] && [ ! -f "$d/libsubstrate.tbd" ]; then
+              parent_lib=$(dirname "$d")
+              for lib in "$parent_lib"/libsubstrate.* "$THEOS"/lib/libsubstrate.*; do
+                [ -f "$lib" ] && ln -sf "$lib" "$d/" 2>/dev/null && echo "Linked $lib -> $d/"
+              done
+            fi
           done
           echo "=== Installing libroothide headers ==="
           mkdir -p "$THEOS_INC/roothide"
@@ -108,11 +112,21 @@ jobs:
 
       - name: Build AppSync subprojects
         working-directory: AppSync
-        run: make ${{ matrix.scheme_var }}
+        run: |
+          if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
+            make THEOS_PACKAGE_SCHEME=rootless
+          else
+            make ${{ matrix.scheme_var }}
+          fi
 
       - name: Build mcp-appinst
         working-directory: AppSync/appinst
-        run: make ${{ matrix.scheme_var }}
+        run: |
+          if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
+            make THEOS_PACKAGE_SCHEME=rootless
+          else
+            make ${{ matrix.scheme_var }}
+          fi
 
       - name: Build mcp-root
         working-directory: mcp-root
