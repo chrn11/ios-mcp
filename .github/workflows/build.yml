@@ -44,19 +44,12 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
           echo "=== Patching Theos for roothide scheme ==="
-          # Copy rootless module content to roothide so Theos accepts the scheme and provides link libs
-          for d in $(find "$THEOS" -maxdepth 3 -type d -name rootless 2>/dev/null); do
+          # Copy ALL rootless dirs (module, include, lib etc.) to roothide
+          for d in $(find "$THEOS" -maxdepth 5 -type d -name rootless 2>/dev/null); do
             target="${d%rootless}roothide"
-            echo "Copying $d -> $target"
-            cp -a "$d" "$target"
-          done
-          # Ensure substrate library is reachable in roothide module dir
-          for d in $(find "$THEOS" -maxdepth 3 -type d -name roothide 2>/dev/null); do
-            if [ ! -f "$d/libsubstrate.dylib" ] && [ ! -f "$d/libsubstrate.tbd" ]; then
-              parent_lib=$(dirname "$d")
-              for lib in "$parent_lib"/libsubstrate.* "$THEOS"/lib/libsubstrate.*; do
-                [ -f "$lib" ] && ln -sf "$lib" "$d/" 2>/dev/null && echo "Linked $lib -> $d/"
-              done
+            if [ ! -d "$target" ]; then
+              echo "Copying $d -> $target"
+              cp -a "$d" "$target"
             fi
           done
           echo "=== Installing libroothide headers ==="
@@ -158,7 +151,11 @@ jobs:
       - name: Build ios-mcp package
         run: |
           make clean
-          make package ${{ matrix.scheme_var }}
+          if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
+            make package THEOS_PACKAGE_SCHEME=rootless
+          else
+            make package ${{ matrix.scheme_var }}
+          fi
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
