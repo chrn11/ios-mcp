@@ -41,9 +41,15 @@ NSString *MCPResolvedJailbreakPath(NSString *path) {
     if (!path.length) return @"";
 
     NSFileManager *fm = [NSFileManager defaultManager];
+    // Try jbroot() first (works with actual libroothide)
     NSString *resolved = jbroot(path);
     if (resolved.length && [fm fileExistsAtPath:resolved]) return resolved;
+    // Fall back to original path (rootful / rootless)
     if ([fm fileExistsAtPath:path]) return path;
+    // Try /var/jb prefix for roothide with stub
+    NSString *varjbPath = [@"/var/jb" stringByAppendingString:path];
+    if ([fm fileExistsAtPath:varjbPath]) return varjbPath;
+    // Last resort: return jbroot() result
     return resolved.length ? resolved : path;
 }
 
