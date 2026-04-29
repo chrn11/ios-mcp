@@ -130,15 +130,30 @@ jobs:
 
       - name: Build mcp-root
         working-directory: mcp-root
-        run: make ${{ matrix.scheme_var }}
+        run: |
+          if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
+            make THEOS_PACKAGE_SCHEME=rootless
+          else
+            make ${{ matrix.scheme_var }}
+          fi
 
       - name: Build mcp-roothelper
         working-directory: mcp-roothelper
-        run: make ${{ matrix.scheme_var }}
+        run: |
+          if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
+            make THEOS_PACKAGE_SCHEME=rootless
+          else
+            make ${{ matrix.scheme_var }}
+          fi
 
       - name: Build mcp-ldid
         working-directory: mcp-ldid
-        run: make ${{ matrix.scheme_var }}
+        run: |
+          if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
+            make THEOS_PACKAGE_SCHEME=rootless
+          else
+            make ${{ matrix.scheme_var }}
+          fi
 
       - name: Build ios-mcp package
         run: |
