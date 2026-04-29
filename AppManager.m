@@ -657,6 +657,16 @@ static BOOL MCPWaitForURLOpenVerification(NSURL *url, NSString *previousBundleId
         dispatch_sync(dispatch_get_main_queue(), block);
     }
 
+    // Some private schemes (notably prefs:/app-prefs:) can report NO from
+    // UIKit/LS even though SpringBoard performs the handoff shortly after the
+    // call returns. Verify the visible foreground transition once more outside
+    // the main-thread open dispatch before reporting failure.
+    if (!ok && attemptedOpen && MCPWaitForURLOpenVerification(url, previousBundleId, 2.0)) {
+        APP_LOG(@"Verified URL open after main dispatch returned: %@", urlString);
+        ok = YES;
+        errMsg = nil;
+    }
+
     if (error) *error = errMsg;
     return ok;
 }

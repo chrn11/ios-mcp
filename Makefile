@@ -10,16 +10,12 @@ endif
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = ios-mcp ios-mcp-helper
+TWEAK_NAME = ios-mcp
 BUNDLE_NAME = iosmcpprefs
 
-ios-mcp_FILES = Tweak.x MCPServer.m HIDManager.m ScreenManager.m ClipboardManager.m AppManager.m AccessibilityManager.m TextInputManager.m MCPProcessUtil.m MCPInputValidator.m
+ios-mcp_FILES = Tweak.x MCPServer.m HIDManager.m ScreenManager.m ClipboardManager.m AppManager.m AccessibilityManager.m TextInputManager.m MCPProcessUtil.m MCPInputValidator.m MCPAXQueryContext.m MCPAXRemoteContextResolver.m MCPUIElementSerializer.m MCPUIElementsFacade.m MCPAXAttributeBridge.m MCPAXNodeSource.m
 ios-mcp_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations
 ios-mcp_FRAMEWORKS = IOKit UIKit CoreGraphics QuartzCore MobileCoreServices AVFoundation Security
-
-ios-mcp-helper_FILES = helper/AXHelper.m
-ios-mcp-helper_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations
-ios-mcp-helper_FRAMEWORKS = UIKit CoreGraphics
 
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
     ios-mcp_LIBRARIES = roothide
@@ -36,9 +32,7 @@ iosmcpprefs_INSTALL_PATH = /Library/PreferenceBundles
 iosmcpprefs_RESOURCE_DIRS = prefs/Resources
 iosmcpprefs_USE_MODULES = 0
 
-# ollvm相关配置（仅在 OLLVM_TOOLCHAIN 环境变量指向有效路径时启用）
 ios-mcp_USE_MODULES = 0
-ios-mcp-helper_USE_MODULES = 0
 ifdef OLLVM_TOOLCHAIN
     OLLVMNAME = LLVM19.0.0git
     TARGET_CC = $(OLLVM_TOOLCHAIN)/usr/bin/clang
@@ -47,8 +41,6 @@ ifdef OLLVM_TOOLCHAIN
     OLLVMPASS = -mllvm -enable-bcfobf -mllvm -enable-cffobf -mllvm -enable-splitobf -mllvm -enable-subobf -mllvm -enable-indibran -mllvm -enable-strcry -mllvm -enable-funcwra -mllvm -enable-fco
     ios-mcp_CFLAGS += $(OLLVMPASS)
     ios-mcp_CXXFLAGS += $(OLLVMPASS)
-    ios-mcp-helper_CFLAGS += $(OLLVMPASS)
-    ios-mcp-helper_CXXFLAGS += $(OLLVMPASS)
 endif
 
 include $(THEOS_MAKE_PATH)/tweak.mk

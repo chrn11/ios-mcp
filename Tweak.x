@@ -31,6 +31,16 @@ static void ios_mcp_write_enabled_preference(BOOL enabled) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)IOS_MCP_PREFERENCES_DOMAIN);
 }
 
+static BOOL ios_mcp_is_springboard_process(void) {
+    NSString *processName = [[NSProcessInfo processInfo] processName];
+    if ([processName isEqualToString:@"SpringBoard"]) {
+        return YES;
+    }
+
+    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+    return [bundleIdentifier isEqualToString:@"com.apple.springboard"];
+}
+
 static void ios_mcp_start_server(void) {
     [[MCPServer sharedInstance] startOnPort:IOS_MCP_DEFAULT_PORT];
 }
@@ -62,6 +72,92 @@ static void ios_mcp_handle_control_notification(CFNotificationCenterRef center,
     }
 }
 
+static void ios_mcp_autostart_if_needed(NSString *reason) {
+    if (!ios_mcp_is_springboard_process()) {
+        return;
+    }
+
+    if (!ios_mcp_enabled_preference()) {
+        NSLog(@"[witchan][ios-mcp] Auto-start skipped (%@): disabled in Settings", reason ?: @"unknown");
+        return;
+    }
+
+    MCPServer *server = [MCPServer sharedInstance];
+    if (server.isRunning) {
+        NSLog(@"[witchan][ios-mcp] Auto-start skipped (%@): already running on port %d",
+              reason ?: @"unknown",
+              server.port);
+        return;
+    }
+
+    NSLog(@"[witchan][ios-mcp] Auto-start attempt (%@) on port %d...",
+          reason ?: @"unknown",
+          IOS_MCP_DEFAULT_PORT);
+    ios_mcp_start_server();
+
+    if (!server.isRunning) {
+        NSLog(@"[witchan][ios-mcp] Auto-start attempt (%@) did not start server; later retry may recover",
+              reason ?: @"unknown");
+    }
+}
+
+static void ios_mcp_schedule_autostart_attempt(NSString *reason, NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * (NSTimeInterval)NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        ios_mcp_autostart_if_needed(reason);
+    });
+}
+
+static void ios_mcp_schedule_bootstrap_autostart(NSString *reason) {
+    if (!ios_mcp_is_springboard_process()) {
+        return;
+    }
+
+    /*
+     Do not rely only on -[SpringBoard applicationDidFinishLaunching:].
+     On some jailbreak/iOS combinations after sbreload the tweak can be loaded
+     before the hook-driven launch callback is useful, and the first UI action
+     (for example Home) becomes the accidental trigger.  Schedule several
+     idempotent attempts from the constructor/runloop/lifecycle path so the
+     socket is brought up as soon as the new SpringBoard is alive.
+     */
+    const NSTimeInterval delays[] = {0.2, 1.0, 2.0, 5.0, 10.0, 20.0};
+    const size_t count = sizeof(delays) / sizeof(delays[0]);
+    for (size_t i = 0; i < count; i++) {
+        NSString *attemptReason = [NSString stringWithFormat:@"%@#%zu", reason ?: @"bootstrap", i + 1];
+        ios_mcp_schedule_autostart_attempt(attemptReason, delays[i]);
+    }
+}
+
+static void ios_mcp_register_lifecycle_notifications(void) {
+    if (!ios_mcp_is_springboard_process()) {
+        return;
+    }
+
+    static BOOL registered = NO;
+    if (registered) {
+        return;
+    }
+    registered = YES;
+
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserverForName:UIApplicationDidFinishLaunchingNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(__unused NSNotification *notification) {
+        NSLog(@"[witchan][ios-mcp] UIApplicationDidFinishLaunchingNotification observed");
+        ios_mcp_schedule_bootstrap_autostart(@"UIApplicationDidFinishLaunching");
+    }];
+
+    [center addObserverForName:UIApplicationDidBecomeActiveNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(__unused NSNotification *notification) {
+        NSLog(@"[witchan][ios-mcp] UIApplicationDidBecomeActiveNotification observed");
+        ios_mcp_schedule_autostart_attempt(@"UIApplicationDidBecomeActive", 0.1);
+    }];
+}
+
 static void ios_mcp_register_control_notifications(void) {
     CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
     CFNotificationCenterAddObserver(center,
@@ -82,6 +178,20 @@ static void ios_mcp_register_control_notifications(void) {
 __attribute__((constructor)) static void ios_mcp_init(void) {
     NSLog(@"[witchan][ios-mcp] dylib loaded into process: %@", [[NSProcessInfo processInfo] processName]);
     ios_mcp_register_control_notifications();
+
+    if (ios_mcp_is_springboard_process()) {
+        ios_mcp_register_lifecycle_notifications();
+        /*
+         Start once directly from the constructor as well.  The delayed
+         dispatch_after retries are still kept as a safety net, but on some
+         rootful/Substitute iOS 14 devices SpringBoard may not deliver the
+         lifecycle notifications until after the first Home interaction.  A
+         synchronous constructor start keeps the MCP socket available
+         immediately after sbreload/respring.
+         */
+        ios_mcp_autostart_if_needed(@"constructor-immediate");
+        ios_mcp_schedule_bootstrap_autostart(@"constructor");
+    }
 }
 
 %hook SpringBoard
@@ -91,16 +201,7 @@ __attribute__((constructor)) static void ios_mcp_init(void) {
 
     NSLog(@"[witchan][ios-mcp] SpringBoard applicationDidFinishLaunching fired");
 
-    // Start MCP server after SpringBoard finishes launching
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        if (!ios_mcp_enabled_preference()) {
-            NSLog(@"[witchan][ios-mcp] Auto-start disabled in Settings");
-            return;
-        }
-
-        NSLog(@"[witchan][ios-mcp] Starting MCP server on port %d...", IOS_MCP_DEFAULT_PORT);
-        ios_mcp_start_server();
-    });
+    ios_mcp_schedule_bootstrap_autostart(@"SpringBoard.applicationDidFinishLaunching");
 }
 
 %end

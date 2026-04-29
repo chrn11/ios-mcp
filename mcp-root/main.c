@@ -23,6 +23,7 @@ typedef enum {
     MCP_ALLOWED_COMMAND_APPINST,
     MCP_ALLOWED_COMMAND_LDID,
     MCP_ALLOWED_COMMAND_CHMOD,
+    MCP_ALLOWED_COMMAND_LAUNCHCTL,
 } MCPAllowedCommand;
 
 static const char *resolve_command_path(const char *path) {
@@ -150,6 +151,26 @@ static int validate_chmod_arguments(int argc, char *argv[]) {
     return 1;
 }
 
+static int validate_launchctl_arguments(int argc, char *argv[]) {
+    if (argc != 5) {
+        fprintf(stderr, "launchctl usage is restricted to kickstart -k approved accessibility services\n");
+        return 0;
+    }
+
+    if (strcmp(argv[2], "kickstart") != 0 || strcmp(argv[3], "-k") != 0) {
+        fprintf(stderr, "launchctl arguments are not permitted\n");
+        return 0;
+    }
+
+    if (strcmp(argv[4], "system/com.apple.accessibility.AccessibilityUIServer") != 0 &&
+        strcmp(argv[4], "system/com.apple.VoiceOverTouch") != 0) {
+        fprintf(stderr, "launchctl target is not permitted: %s\n", argv[4] ? argv[4] : "(null)");
+        return 0;
+    }
+
+    return 1;
+}
+
 static MCPAllowedCommand classify_allowed_command(const char *command_path) {
     struct {
         const char *logical_path;
@@ -160,6 +181,8 @@ static MCPAllowedCommand classify_allowed_command(const char *command_path) {
         {"/usr/bin/mcp-ldid", MCP_ALLOWED_COMMAND_LDID},
         {"/bin/chmod", MCP_ALLOWED_COMMAND_CHMOD},
         {"/usr/bin/chmod", MCP_ALLOWED_COMMAND_CHMOD},
+        {"/bin/launchctl", MCP_ALLOWED_COMMAND_LAUNCHCTL},
+        {"/usr/bin/launchctl", MCP_ALLOWED_COMMAND_LAUNCHCTL},
     };
     size_t i;
 
@@ -189,6 +212,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (allowedCommand == MCP_ALLOWED_COMMAND_CHMOD && !validate_chmod_arguments(argc, argv)) {
+        return 126;
+    }
+    if (allowedCommand == MCP_ALLOWED_COMMAND_LAUNCHCTL && !validate_launchctl_arguments(argc, argv)) {
         return 126;
     }
 

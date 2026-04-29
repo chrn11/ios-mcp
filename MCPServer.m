@@ -20,10 +20,11 @@
 #import <mach/mach.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <dlfcn.h>
 
 #define MCP_PROTOCOL_VERSION @"2025-03-26"
 #define MCP_SERVER_NAME      @"ios-mcp"
-#define MCP_SERVER_VERSION   @"1.0.0"
+#define MCP_SERVER_VERSION   @"1.0.1"
 #define HTTP_BUF_SIZE        (256 * 1024)
 #define MCP_UPLOAD_DIR       @"/tmp/ios-mcp-uploads"
 #define MCP_MAX_UPLOAD_BYTES (500LL * 1024LL * 1024LL)
@@ -79,6 +80,34 @@ static BOOL MCPStringFromArgs(NSDictionary *args, NSString *key, BOOL required, 
     return NO;
 }
 
+static BOOL MCPBoolFromArgs(NSDictionary *args, NSString *key, BOOL defaultValue, BOOL *outValue, NSString **outError) {
+    id value = args[key];
+    if (!value || value == [NSNull null]) {
+        if (outValue) *outValue = defaultValue;
+        return YES;
+    }
+
+    if ([value isKindOfClass:[NSNumber class]]) {
+        if (outValue) *outValue = [value boolValue];
+        return YES;
+    }
+
+    if ([value isKindOfClass:[NSString class]]) {
+        NSString *lower = [(NSString *)value lowercaseString];
+        if ([lower isEqualToString:@"true"] || [lower isEqualToString:@"yes"] || [lower isEqualToString:@"1"]) {
+            if (outValue) *outValue = YES;
+            return YES;
+        }
+        if ([lower isEqualToString:@"false"] || [lower isEqualToString:@"no"] || [lower isEqualToString:@"0"]) {
+            if (outValue) *outValue = NO;
+            return YES;
+        }
+    }
+
+    if (outError) *outError = [NSString stringWithFormat:@"Invalid parameter %@: expected boolean", key];
+    return NO;
+}
+
 static NSString *MCPBasePath(NSString *path) {
     if (!path.length) return @"";
     NSRange query = [path rangeOfString:@"?"];
@@ -98,6 +127,169 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
     }
     return YES;
 }
+
+static void MCPAddWhitelistedKeys(NSMutableDictionary *destination, NSDictionary *source, NSArray<NSString *> *keys) {
+    if (![destination isKindOfClass:[NSMutableDictionary class]] ||
+        ![source isKindOfClass:[NSDictionary class]] ||
+        ![keys isKindOfClass:[NSArray class]]) {
+        return;
+    }
+
+    for (NSString *key in keys) {
+        id value = source[key];
+        if (value && value != [NSNull null]) {
+            destination[key] = value;
+        }
+    }
+}
+
+static BOOL MCPRectValuesFromDictionary(NSDictionary *rect, double *outX, double *outY, double *outWidth, double *outHeight) {
+    if (![rect isKindOfClass:[NSDictionary class]]) {
+        return NO;
+    }
+
+    id xValue = rect[@"x"] ?: rect[@"X"];
+    id yValue = rect[@"y"] ?: rect[@"Y"];
+    id widthValue = rect[@"width"] ?: rect[@"Width"];
+    id heightValue = rect[@"height"] ?: rect[@"Height"];
+    if (![xValue respondsToSelector:@selector(doubleValue)] ||
+        ![yValue respondsToSelector:@selector(doubleValue)] ||
+        ![widthValue respondsToSelector:@selector(doubleValue)] ||
+        ![heightValue respondsToSelector:@selector(doubleValue)]) {
+        return NO;
+    }
+
+    double x = [xValue doubleValue];
+    double y = [yValue doubleValue];
+    double width = [widthValue doubleValue];
+    double height = [heightValue doubleValue];
+    if (!isfinite(x) || !isfinite(y) || !isfinite(width) || !isfinite(height) || width <= 0.0 || height <= 0.0) {
+        return NO;
+    }
+
+    if (outX) *outX = x;
+    if (outY) *outY = y;
+    if (outWidth) *outWidth = width;
+    if (outHeight) *outHeight = height;
+    return YES;
+}
+
+static double MCPRandomUnit(void) {
+    return ((double)arc4random_uniform(1000000) / 1000000.0);
+}
+
+static double MCPRoundedScreenPoint(double value) {
+    return round(value * 10.0) / 10.0;
+}
+
+static NSDictionary *MCPRandomizedTapPointForElement(NSDictionary *element) {
+    if (![element isKindOfClass:[NSDictionary class]]) {
+        return nil;
+    }
+
+    NSDictionary *rect = [element[@"visible_rect"] isKindOfClass:[NSDictionary class]] ? element[@"visible_rect"] : nil;
+    if (!rect) {
+        rect = [element[@"rect"] isKindOfClass:[NSDictionary class]] ? element[@"rect"] : nil;
+    }
+
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    if (!MCPRectValuesFromDictionary(rect, &x, &y, &width, &height)) {
+        NSDictionary *tap = [element[@"tap"] isKindOfClass:[NSDictionary class]] ? element[@"tap"] : nil;
+        return tap;
+    }
+
+    // Stay away from edges, but keep enough room for very small controls.
+    double marginX = width > 4.0 ? MIN(8.0, width * 0.2) : 0.0;
+    double marginY = height > 4.0 ? MIN(8.0, height * 0.2) : 0.0;
+    double minX = x + marginX;
+    double maxX = x + width - marginX;
+    double minY = y + marginY;
+    double maxY = y + height - marginY;
+    if (maxX <= minX) {
+        minX = x;
+        maxX = x + width;
+    }
+    if (maxY <= minY) {
+        minY = y;
+        maxY = y + height;
+    }
+
+    double tapX = minX + ((maxX - minX) * MCPRandomUnit());
+    double tapY = minY + ((maxY - minY) * MCPRandomUnit());
+    tapX = MIN(MAX(tapX, x), x + width);
+    tapY = MIN(MAX(tapY, y), y + height);
+    return @{
+        @"x": @(MCPRoundedScreenPoint(tapX)),
+        @"y": @(MCPRoundedScreenPoint(tapY))
+    };
+}
+
+
+@interface MCPServer ()
++ (instancetype)sharedInstance;
+- (instancetype)init;
+- (void)startOnPort:(uint16_t)port;
+- (void)stop;
+- (void)handleClient:(int)clientSocket;
+- (NSString *)uploadFileNameFromRequestPath:(NSString *)path headers:(NSDictionary *)headers;
+- (void)handleUploadFileRequestPath:(NSString *)path
+                             headers:(NSDictionary *)headers
+                       contentLength:(NSInteger)contentLength
+                         initialBody:(const char *)initialBody
+                   initialBodyLength:(ssize_t)initialBodyLength
+                        clientSocket:(int)clientSocket;
+- (void)handleMCPRequest:(NSData *)bodyData clientSocket:(int)clientSocket;
+- (NSDictionary *)routeMCPRequest:(NSDictionary *)request;
+- (NSDictionary *)handleInitialize:(id)reqId;
+- (NSDictionary *)handleToolsList:(id)reqId;
+- (NSDictionary *)handleToolsCall:(id)reqId params:(NSDictionary *)params;
+- (NSDictionary *)executeButtonPress:(id)reqId button:(HIDButtonType)button args:(NSDictionary *)args label:(NSString *)label;
+- (NSDictionary *)executeTap:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeSwipe:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeScreenInfo:(id)reqId;
+- (NSDictionary *)executeScreenshot:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeGetClipboard:(id)reqId;
+- (NSDictionary *)executeSetClipboard:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeLaunchApp:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeKillApp:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeListApps:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeListRunningApps:(id)reqId;
+- (NSDictionary *)executeGetFrontmostApp:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeGetUIElements:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeGetElementAtPoint:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeInputText:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeTypeText:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executePressKey:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeLongPress:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeDoubleTap:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeDragAndDrop:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeOpenURL:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeGetDeviceInfo:(id)reqId;
+- (NSDictionary *)executeRunCommand:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeGetBrightness:(id)reqId;
+- (NSDictionary *)executeSetBrightness:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeGetVolume:(id)reqId;
+- (NSDictionary *)executeSetVolume:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeInstallApp:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)executeUninstallApp:(id)reqId args:(NSDictionary *)args;
+- (NSDictionary *)sanitizeFrontmostInfo:(NSDictionary *)info debug:(BOOL)debug;
+- (NSDictionary *)sanitizeUIElementsPayload:(NSDictionary *)payload debug:(BOOL)debug;
+- (NSDictionary *)sanitizeUIElement:(NSDictionary *)element debug:(BOOL)debug;
+- (NSDictionary *)sanitizeElementAtPointPayload:(NSDictionary *)payload debug:(BOOL)debug;
+- (NSDictionary *)sanitizeScreenshotContent:(NSDictionary *)content debug:(BOOL)debug;
+- (NSDictionary *)sanitizeAccessibilityFailurePayload:(NSDictionary *)payload debug:(BOOL)debug;
+- (NSDictionary *)mcpSuccess:(id)reqId text:(NSString *)text;
+- (NSDictionary *)mcpSuccess:(id)reqId text:(NSString *)text isError:(BOOL)isError;
+- (NSDictionary *)mcpError:(id)reqId code:(NSInteger)code message:(NSString *)message;
+- (void)sendJSONResponse:(int)socket status:(int)status body:(NSDictionary *)body;
+- (void)sendErrorResponse:(int)socket status:(int)status message:(NSString *)message;
+- (void)sendMethodNotAllowedResponse:(int)socket allowedMethods:(NSString *)allowedMethods message:(NSString *)message;
+- (void)sendEmptyResponse:(int)socket status:(int)status;
+- (void)writeAll:(int)socket data:(NSData *)data;
+@end
 
 @implementation MCPServer {
     int _serverSocket;
@@ -619,7 +811,12 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         @{
             @"name": @"screenshot",
             @"description": @"Take a screenshot. Returns MCP image content, not text: result.content[0].type is image, mimeType is usually image/jpeg, and data contains the base64 JPEG payload compressed under about 400KB.",
-            @"inputSchema": @{@"type": @"object", @"properties": @{}}
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"debug": @{@"type": @"boolean", @"description": @"Include diagnostic screenshot source metadata (default: false)"}
+                }
+            }
         },
         // ---- Clipboard tools ----
         @{
@@ -679,17 +876,25 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         @{
             @"name": @"get_frontmost_app",
             @"description": @"Get the bundle identifier and name of the currently foreground app",
-            @"inputSchema": @{@"type": @"object", @"properties": @{}}
+            @"inputSchema": @{
+                @"type": @"object",
+                @"properties": @{
+                    @"debug": @{@"type": @"boolean", @"description": @"Include resolver and AX diagnostic metadata (default: false)"}
+                }
+            }
         },
         // ---- Accessibility tools ----
         @{
             @"name": @"get_ui_elements",
-            @"description": @"Get the accessibility tree of the frontmost app's screen. Returns a JSON tree of UI elements with labels, types, frames, and values.",
+            @"description": @"Get current screen UI elements as a compact clickable/position list from the direct AX compact path.",
             @"inputSchema": @{
                 @"type": @"object",
                 @"properties": @{
-                    @"max_depth": @{@"type": @"integer", @"description": @"Max tree depth (default: 20)"},
-                    @"max_elements": @{@"type": @"integer", @"description": @"Max elements to return (default: 2000)"}
+                    @"visible_only": @{@"type": @"boolean", @"description": @"Include only nodes whose rect intersects the current screen (default: true)"},
+                    @"clickable_only": @{@"type": @"boolean", @"description": @"Include only hittable/clickable nodes (default: false)"},
+                    @"limit": @{@"type": @"integer", @"description": @"Max returned elements after filtering (default: no extra limit)"},
+                    @"max_elements": @{@"type": @"integer", @"description": @"Max elements to return (default: 2000)"},
+                    @"debug": @{@"type": @"boolean", @"description": @"Include AX runtime, resolver, and candidate diagnostics (default: false)"}
                 }
             }
         },
@@ -700,7 +905,8 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
                 @"type": @"object",
                 @"properties": @{
                     @"x": @{@"type": @"number", @"description": @"X coordinate in screen points"},
-                    @"y": @{@"type": @"number", @"description": @"Y coordinate in screen points"}
+                    @"y": @{@"type": @"number", @"description": @"Y coordinate in screen points"},
+                    @"debug": @{@"type": @"boolean", @"description": @"Include AX runtime and resolver diagnostics (default: false)"}
                 },
                 @"required": @[@"x", @"y"]
             }
@@ -1047,7 +1253,7 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
     else if ([toolName isEqualToString:@"get_screen_info"]) {
         return [self executeScreenInfo:reqId];
     } else if ([toolName isEqualToString:@"screenshot"]) {
-        return [self executeScreenshot:reqId];
+        return [self executeScreenshot:reqId args:args];
     }
     // Clipboard tools
     else if ([toolName isEqualToString:@"get_clipboard"]) {
@@ -1065,7 +1271,7 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
     } else if ([toolName isEqualToString:@"list_running_apps"]) {
         return [self executeListRunningApps:reqId];
     } else if ([toolName isEqualToString:@"get_frontmost_app"]) {
-        return [self executeGetFrontmostApp:reqId];
+        return [self executeGetFrontmostApp:reqId args:args];
     }
     // Accessibility tools
     else if ([toolName isEqualToString:@"get_ui_elements"]) {
@@ -1228,7 +1434,7 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         err = error;
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
 
     if (ok) {
         return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Swiped from (%.1f,%.1f) to (%.1f,%.1f) in %.0fms", from.x, from.y, to.x, to.y, duration]];
@@ -1243,11 +1449,15 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
     return [self mcpSuccess:reqId text:jsonStr];
 }
 
-- (NSDictionary *)executeScreenshot:(id)reqId {
+- (NSDictionary *)executeScreenshot:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    BOOL debug = NO;
+    if (!MCPBoolFromArgs(args, @"debug", NO, &debug, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
     NSDictionary *payload = [[ScreenManager sharedInstance] takeScreenshotPayload];
     NSString *base64 = payload[@"data"];
     NSString *mimeType = payload[@"mimeType"] ?: @"image/jpeg";
-    NSString *source = payload[@"source"] ?: @"unknown";
     if (base64.length == 0) {
         return [self mcpSuccess:reqId text:@"Failed to capture screenshot" isError:YES];
     }
@@ -1256,15 +1466,16 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         @"type": @"image",
         @"data": base64,
         @"mimeType": mimeType,
-        @"source": source
+        @"source": payload[@"source"] ?: @"unknown"
     } mutableCopy];
+    NSDictionary *responseContent = [self sanitizeScreenshotContent:imageContent debug:debug];
 
     return @{
         @"jsonrpc": @"2.0",
         @"id": reqId ?: [NSNull null],
         @"result": @{
             @"content": @[
-                imageContent
+                responseContent
             ]
         }
     };
@@ -1346,51 +1557,305 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
     return [self mcpSuccess:reqId text:jsonStr];
 }
 
-- (NSDictionary *)executeGetFrontmostApp:(id)reqId {
+- (NSDictionary *)executeGetFrontmostApp:(id)reqId args:(NSDictionary *)args {
+    NSString *paramError = nil;
+    BOOL debug = NO;
+    if (!MCPBoolFromArgs(args, @"debug", NO, &debug, &paramError)) {
+        return [self mcpError:reqId code:-32602 message:paramError];
+    }
+
     NSDictionary *info = [[AppManager sharedInstance] getFrontmostApp];
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:info options:0 error:nil];
+    NSDictionary *responseInfo = [self sanitizeFrontmostInfo:info debug:debug];
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:responseInfo options:0 error:nil];
     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
     return [self mcpSuccess:reqId text:jsonStr];
+}
+
+#pragma mark - MCP Response Sanitizers
+
+- (NSDictionary *)sanitizeFrontmostInfo:(NSDictionary *)info debug:(BOOL)debug {
+    if (![info isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    if (debug) {
+        return info;
+    }
+
+    NSMutableDictionary *sanitized = [NSMutableDictionary dictionary];
+    MCPAddWhitelistedKeys(sanitized, info, @[
+        @"bundleId",
+        @"name",
+        @"processName",
+        @"pid",
+        @"contextId",
+        @"displayId",
+        @"sceneIdentifier"
+    ]);
+    return [sanitized copy];
+}
+
+- (NSDictionary *)sanitizeUIElement:(NSDictionary *)element debug:(BOOL)debug {
+    if (![element isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    if (debug) {
+        return element;
+    }
+
+    NSMutableDictionary *sanitized = [NSMutableDictionary dictionary];
+    MCPAddWhitelistedKeys(sanitized, element, @[
+        @"index",
+        @"type",
+        @"text",
+        @"clickable",
+        @"rect",
+        @"visible_rect"
+    ]);
+    NSDictionary *tap = MCPRandomizedTapPointForElement(element);
+    if (tap.count > 0) {
+        sanitized[@"tap"] = tap;
+    }
+    return [sanitized copy];
+}
+
+- (NSDictionary *)sanitizeUIElementsPayload:(NSDictionary *)payload debug:(BOOL)debug {
+    if (![payload isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    if (debug) {
+        NSMutableDictionary *debugPayload = [payload mutableCopy];
+        [debugPayload removeObjectForKey:@"format"];
+        return [debugPayload copy];
+    }
+
+    NSMutableDictionary *sanitized = [NSMutableDictionary dictionary];
+    MCPAddWhitelistedKeys(sanitized, payload, @[
+        @"screen",
+        @"visible_only",
+        @"clickable_only",
+        @"count",
+        @"element_count",
+        @"bundleId",
+        @"processName",
+        @"pid",
+        @"contextId",
+        @"displayId"
+    ]);
+
+    NSArray *elements = [payload[@"elements"] isKindOfClass:[NSArray class]] ? payload[@"elements"] : nil;
+    if (elements) {
+        NSMutableArray *sanitizedElements = [NSMutableArray arrayWithCapacity:elements.count];
+        for (id item in elements) {
+            if (![item isKindOfClass:[NSDictionary class]]) {
+                continue;
+            }
+            [sanitizedElements addObject:[self sanitizeUIElement:item debug:NO]];
+        }
+        sanitized[@"elements"] = sanitizedElements;
+    }
+
+    return [sanitized copy];
+}
+
+- (NSDictionary *)sanitizeElementAtPointPayload:(NSDictionary *)payload debug:(BOOL)debug {
+    if (![payload isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    if (debug) {
+        return payload;
+    }
+
+    NSMutableDictionary *sanitized = [NSMutableDictionary dictionary];
+    MCPAddWhitelistedKeys(sanitized, payload, @[
+        @"id",
+        @"element_id",
+        @"stablePath",
+        @"path",
+        @"parent",
+        @"parentId",
+        @"role",
+        @"rawRole",
+        @"elementType",
+        @"type",
+        @"label",
+        @"text",
+        @"title",
+        @"value",
+        @"description",
+        @"identifier",
+        @"placeholder",
+        @"frame",
+        @"visibleFrame",
+        @"rect",
+        @"visible_rect",
+        @"focusable_frame_for_zoom",
+        @"center_point",
+        @"visible_point",
+        @"tap",
+        @"hit_test_point",
+        @"queryPoint",
+        @"clickable",
+        @"enabled",
+        @"selected",
+        @"focused",
+        @"visible",
+        @"hittable",
+        @"traits",
+        @"trait_names",
+        @"is_accessible_element",
+        @"child_count",
+        @"pid",
+        @"bundleId",
+        @"processName",
+        @"contextId",
+        @"displayId"
+    ]);
+
+    NSArray *children = [payload[@"children"] isKindOfClass:[NSArray class]] ? payload[@"children"] : nil;
+    if (children) {
+        NSMutableArray *sanitizedChildren = [NSMutableArray arrayWithCapacity:children.count];
+        for (id child in children) {
+            if (![child isKindOfClass:[NSDictionary class]]) {
+                continue;
+            }
+            [sanitizedChildren addObject:[self sanitizeElementAtPointPayload:child debug:NO]];
+        }
+        sanitized[@"children"] = sanitizedChildren;
+    }
+
+    return [sanitized copy];
+}
+
+- (NSDictionary *)sanitizeScreenshotContent:(NSDictionary *)content debug:(BOOL)debug {
+    if (![content isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    if (debug) {
+        return content;
+    }
+
+    NSMutableDictionary *sanitized = [NSMutableDictionary dictionary];
+    MCPAddWhitelistedKeys(sanitized, content, @[
+        @"type",
+        @"data",
+        @"mimeType"
+    ]);
+    return [sanitized copy];
+}
+
+- (NSDictionary *)sanitizeAccessibilityFailurePayload:(NSDictionary *)payload debug:(BOOL)debug {
+    if (![payload isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    if (debug) {
+        return payload;
+    }
+
+    NSMutableDictionary *sanitized = [NSMutableDictionary dictionary];
+    MCPAddWhitelistedKeys(sanitized, payload, @[
+        @"ok",
+        @"queryKind",
+        @"error",
+        @"queryPoint",
+        @"axRuntimeMode"
+    ]);
+
+    NSDictionary *frontmostContext = [payload[@"frontmostContext"] isKindOfClass:[NSDictionary class]] ? payload[@"frontmostContext"] : nil;
+    if (frontmostContext.count > 0) {
+        sanitized[@"frontmostContext"] = [self sanitizeFrontmostInfo:frontmostContext debug:NO];
+    }
+
+    return [sanitized copy];
 }
 
 #pragma mark - Accessibility Execution
 
 - (NSDictionary *)executeGetUIElements:(id)reqId args:(NSDictionary *)args {
     NSString *paramError = nil;
-    double maxDepthValue = 0;
     double maxElementsValue = 0;
-    if (!MCPNumberFromArgs(args, @"max_depth", 0, NO, &maxDepthValue, &paramError) ||
-        !MCPNumberFromArgs(args, @"max_elements", 0, NO, &maxElementsValue, &paramError)) {
+    double limitValue = 0;
+    BOOL visibleOnly = YES;
+    BOOL clickableOnly = NO;
+    BOOL debug = NO;
+    if (!MCPNumberFromArgs(args, @"max_elements", 0, NO, &maxElementsValue, &paramError) ||
+        !MCPNumberFromArgs(args, @"limit", 0, NO, &limitValue, &paramError) ||
+        !MCPBoolFromArgs(args, @"visible_only", YES, &visibleOnly, &paramError) ||
+        !MCPBoolFromArgs(args, @"clickable_only", NO, &clickableOnly, &paramError) ||
+        !MCPBoolFromArgs(args, @"debug", NO, &debug, &paramError)) {
         return [self mcpError:reqId code:-32602 message:paramError];
     }
-    NSInteger maxDepth = (NSInteger)maxDepthValue;
     NSInteger maxElements = (NSInteger)maxElementsValue;
+    NSInteger limit = (NSInteger)limitValue;
 
-    __block NSDictionary *tree;
+    __block NSDictionary *payload;
     __block NSString *err;
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
-    [[AccessibilityManager sharedInstance] getUIElementsWithMaxDepth:maxDepth maxElements:maxElements completion:^(NSDictionary *result, NSString *error) {
-        tree = result;
+    NSInteger compactMaxElements = limit > 0 ? limit : maxElements;
+    [[AccessibilityManager sharedInstance] getCompactUIElementsWithMaxElements:compactMaxElements
+                                                                   visibleOnly:visibleOnly
+                                                                 clickableOnly:clickableOnly
+                                                                    completion:^(NSDictionary *result, NSString *error) {
+        payload = result;
         err = error;
         dispatch_semaphore_signal(sem);
     }];
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
 
-    if (tree) {
-        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:tree options:0 error:nil];
+    if (payload) {
+        NSDictionary *responsePayload = [self sanitizeUIElementsPayload:payload debug:debug];
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:responsePayload options:0 error:nil];
         NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
         return [self mcpSuccess:reqId text:jsonStr];
     }
-    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Failed: %@", err ?: @"timeout"] isError:YES];
+    NSDictionary *frontmostInfo = [[AccessibilityManager sharedInstance] frontmostApplicationInfo];
+    NSDictionary *metadata = [frontmostInfo[@"metadata"] isKindOfClass:[NSDictionary class]] ? frontmostInfo[@"metadata"] : nil;
+    NSDictionary *accessibilityState = [metadata[@"accessibilityState"] isKindOfClass:[NSDictionary class]] ? metadata[@"accessibilityState"] : nil;
+    NSMutableDictionary *failurePayload = [NSMutableDictionary dictionary];
+    failurePayload[@"ok"] = @NO;
+    failurePayload[@"queryKind"] = @"compact";
+    failurePayload[@"error"] = err ?: @"timeout";
+    if (frontmostInfo.count > 0) {
+        failurePayload[@"frontmostContext"] = frontmostInfo;
+    }
+    if (accessibilityState.count > 0) {
+        failurePayload[@"accessibilityState"] = accessibilityState;
+        NSString *axRuntimeMode = [accessibilityState[@"axRuntimeMode"] isKindOfClass:[NSString class]] ?
+            accessibilityState[@"axRuntimeMode"] :
+            nil;
+        if (axRuntimeMode.length > 0) {
+            failurePayload[@"axRuntimeMode"] = axRuntimeMode;
+        }
+        NSMutableDictionary *summary = [NSMutableDictionary dictionary];
+        NSString *registrar = [accessibilityState[@"recommendedRegistrarProcess"] isKindOfClass:[NSString class]] ?
+            accessibilityState[@"recommendedRegistrarProcess"] :
+            nil;
+        NSNumber *directRegisterLikelyInsufficient = [accessibilityState[@"currentProcessDirectRegisterLikelyInsufficient"] respondsToSelector:@selector(boolValue)] ?
+            accessibilityState[@"currentProcessDirectRegisterLikelyInsufficient"] :
+            nil;
+        NSString *why = [accessibilityState[@"axRuntimeModeExplanation"] isKindOfClass:[NSString class]] ?
+            accessibilityState[@"axRuntimeModeExplanation"] :
+            ([accessibilityState[@"registrarGuidance"] isKindOfClass:[NSString class]] ? accessibilityState[@"registrarGuidance"] : nil);
+        if (axRuntimeMode.length > 0) summary[@"mode"] = axRuntimeMode;
+        if (registrar.length > 0) summary[@"registrar"] = registrar;
+        if (directRegisterLikelyInsufficient) summary[@"directRegisterLikelyInsufficient"] = @([directRegisterLikelyInsufficient boolValue]);
+        if (why.length > 0) summary[@"why"] = why;
+        if (summary.count > 0) failurePayload[@"axRuntimeSummary"] = summary;
+    }
+    NSDictionary *responsePayload = [self sanitizeAccessibilityFailurePayload:failurePayload debug:debug];
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:responsePayload options:0 error:nil];
+    NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    return [self mcpSuccess:reqId text:jsonStr isError:YES];
 }
 
 - (NSDictionary *)executeGetElementAtPoint:(id)reqId args:(NSDictionary *)args {
     NSString *paramError = nil;
     double x = 0;
     double y = 0;
+    BOOL debug = NO;
     if (!MCPNumberFromArgs(args, @"x", 0, YES, &x, &paramError) ||
-        !MCPNumberFromArgs(args, @"y", 0, YES, &y, &paramError)) {
+        !MCPNumberFromArgs(args, @"y", 0, YES, &y, &paramError) ||
+        !MCPBoolFromArgs(args, @"debug", NO, &debug, &paramError)) {
         return [self mcpError:reqId code:-32602 message:paramError];
     }
 
@@ -1404,14 +1869,53 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
         err = error;
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
 
     if (element) {
-        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:element options:0 error:nil];
+        NSDictionary *responseElement = [self sanitizeElementAtPointPayload:element debug:debug];
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:responseElement options:0 error:nil];
         NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
         return [self mcpSuccess:reqId text:jsonStr];
     }
-    return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"No element found: %@", err ?: @"timeout"] isError:YES];
+    NSDictionary *frontmostInfo = [[AccessibilityManager sharedInstance] frontmostApplicationInfo];
+    NSDictionary *metadata = [frontmostInfo[@"metadata"] isKindOfClass:[NSDictionary class]] ? frontmostInfo[@"metadata"] : nil;
+    NSDictionary *accessibilityState = [metadata[@"accessibilityState"] isKindOfClass:[NSDictionary class]] ? metadata[@"accessibilityState"] : nil;
+    NSMutableDictionary *failurePayload = [NSMutableDictionary dictionary];
+    failurePayload[@"ok"] = @NO;
+    failurePayload[@"queryKind"] = @"hit_test";
+    failurePayload[@"queryPoint"] = @{@"x": @((NSInteger)lrint(point.x)), @"y": @((NSInteger)lrint(point.y))};
+    failurePayload[@"error"] = err ?: @"timeout";
+    if (frontmostInfo.count > 0) {
+        failurePayload[@"frontmostContext"] = frontmostInfo;
+    }
+    if (accessibilityState.count > 0) {
+        failurePayload[@"accessibilityState"] = accessibilityState;
+        NSString *axRuntimeMode = [accessibilityState[@"axRuntimeMode"] isKindOfClass:[NSString class]] ?
+            accessibilityState[@"axRuntimeMode"] :
+            nil;
+        if (axRuntimeMode.length > 0) {
+            failurePayload[@"axRuntimeMode"] = axRuntimeMode;
+        }
+        NSMutableDictionary *summary = [NSMutableDictionary dictionary];
+        NSString *registrar = [accessibilityState[@"recommendedRegistrarProcess"] isKindOfClass:[NSString class]] ?
+            accessibilityState[@"recommendedRegistrarProcess"] :
+            nil;
+        NSNumber *directRegisterLikelyInsufficient = [accessibilityState[@"currentProcessDirectRegisterLikelyInsufficient"] respondsToSelector:@selector(boolValue)] ?
+            accessibilityState[@"currentProcessDirectRegisterLikelyInsufficient"] :
+            nil;
+        NSString *why = [accessibilityState[@"axRuntimeModeExplanation"] isKindOfClass:[NSString class]] ?
+            accessibilityState[@"axRuntimeModeExplanation"] :
+            ([accessibilityState[@"registrarGuidance"] isKindOfClass:[NSString class]] ? accessibilityState[@"registrarGuidance"] : nil);
+        if (axRuntimeMode.length > 0) summary[@"mode"] = axRuntimeMode;
+        if (registrar.length > 0) summary[@"registrar"] = registrar;
+        if (directRegisterLikelyInsufficient) summary[@"directRegisterLikelyInsufficient"] = @([directRegisterLikelyInsufficient boolValue]);
+        if (why.length > 0) summary[@"why"] = why;
+        if (summary.count > 0) failurePayload[@"axRuntimeSummary"] = summary;
+    }
+    NSDictionary *responsePayload = [self sanitizeAccessibilityFailurePayload:failurePayload debug:debug];
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:responsePayload options:0 error:nil];
+    NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    return [self mcpSuccess:reqId text:jsonStr isError:YES];
 }
 
 #pragma mark - Text Input Execution
@@ -1763,11 +2267,62 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
 
 #pragma mark - Brightness Execution
 
+typedef float (*MCPBKSDisplayBrightnessGetCurrentFunc)(void);
+typedef void (*MCPBKSDisplayBrightnessSetFunc)(float brightness, Boolean commit);
+
+static void MCPLoadBackBoardBrightnessSymbols(MCPBKSDisplayBrightnessGetCurrentFunc *outGet,
+                                              MCPBKSDisplayBrightnessSetFunc *outSet) {
+    static dispatch_once_t onceToken;
+    static MCPBKSDisplayBrightnessGetCurrentFunc getFunc = NULL;
+    static MCPBKSDisplayBrightnessSetFunc setFunc = NULL;
+    dispatch_once(&onceToken, ^{
+        void *handle = dlopen("/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices", RTLD_LAZY);
+        if (!handle) {
+            handle = RTLD_DEFAULT;
+        }
+        getFunc = (MCPBKSDisplayBrightnessGetCurrentFunc)dlsym(handle, "BKSDisplayBrightnessGetCurrent");
+        if (!getFunc) {
+            getFunc = (MCPBKSDisplayBrightnessGetCurrentFunc)dlsym(handle, "PSBKSDisplayBrightnessGetCurrent");
+        }
+        setFunc = (MCPBKSDisplayBrightnessSetFunc)dlsym(handle, "BKSDisplayBrightnessSet");
+        if (!setFunc) {
+            setFunc = (MCPBKSDisplayBrightnessSetFunc)dlsym(handle, "PSBKSDisplayBrightnessSet");
+        }
+    });
+    if (outGet) *outGet = getFunc;
+    if (outSet) *outSet = setFunc;
+}
+
+static BOOL MCPGetSystemBrightness(CGFloat *outBrightness) {
+    MCPBKSDisplayBrightnessGetCurrentFunc getFunc = NULL;
+    MCPLoadBackBoardBrightnessSymbols(&getFunc, NULL);
+    if (getFunc) {
+        float value = getFunc();
+        if (isfinite(value) && value >= 0.0f && value <= 1.0f) {
+            if (outBrightness) *outBrightness = (CGFloat)value;
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL MCPSetSystemBrightness(CGFloat brightness) {
+    MCPBKSDisplayBrightnessSetFunc setFunc = NULL;
+    MCPLoadBackBoardBrightnessSymbols(NULL, &setFunc);
+    if (setFunc) {
+        setFunc((float)brightness, true);
+        return YES;
+    }
+    return NO;
+}
+
 - (NSDictionary *)executeGetBrightness:(id)reqId {
     __block CGFloat brightness = 0;
 
     dispatch_block_t block = ^{
-        brightness = [UIScreen mainScreen].brightness;
+        if (!MCPGetSystemBrightness(&brightness)) {
+            brightness = [UIScreen mainScreen].brightness;
+        }
     };
 
     if ([NSThread isMainThread]) {
@@ -1793,6 +2348,7 @@ static BOOL MCPWriteAllToFD(int fd, const void *bytes, size_t length) {
 
     __block BOOL ok = NO;
     dispatch_block_t block = ^{
+        ok = MCPSetSystemBrightness((CGFloat)level);
         [UIScreen mainScreen].brightness = (CGFloat)level;
         ok = YES;
     };
