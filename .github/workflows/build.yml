@@ -39,12 +39,8 @@ jobs:
       - name: Patch Theos for roothide support
         run: |
           # Roothide uses same binary layout as rootless (/var/jb prefix)
-          # Theos validates scheme by checking $THEOS_MODULE_PATH/<scheme> directory exists
-          if [ -d "$THEOS_MODULE_PATH/rootless" ]; then
-            cp -r "$THEOS_MODULE_PATH/rootless" "$THEOS_MODULE_PATH/roothide"
-          else
-            mkdir -p "$THEOS_MODULE_PATH/roothide"
-          fi
+          # Create roothide module dir so Theos accepts the scheme
+          mkdir -p "$THEOS_MODULE_PATH/roothide"
           echo "Patched Theos for roothide scheme support"
 
       - name: Install libroothide and libzip for Theos
