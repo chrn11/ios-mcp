@@ -18,6 +18,8 @@ jobs:
             artifact_name: rootful
           - scheme_var: "THEOS_PACKAGE_SCHEME=rootless"
             artifact_name: rootless
+          - scheme_var: "THEOS_PACKAGE_SCHEME=roothide"
+            artifact_name: roothide
 
     steps:
       - name: Checkout
