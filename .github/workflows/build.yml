@@ -36,6 +36,13 @@ jobs:
       - name: Install Theos
         uses: Randomblock1/theos-action@v1
 
+      - name: Patch Theos for roothide support
+        run: |
+          # Roothide uses same binary layout as rootless (/var/jb prefix)
+          # Patch common.mk to accept roothide as a valid package scheme
+          sed -i '' -E 's/filter +(rootless)/filter rootless roothide/g' "$THEOS/makefiles/common.mk"
+          echo "Patched Theos common.mk for roothide support"
+
       - name: Install libroothide and libzip for Theos
         run: |
           set -e
