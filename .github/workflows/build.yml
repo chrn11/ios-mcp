@@ -153,6 +153,14 @@ jobs:
           make clean
           if [ "${{ matrix.scheme_var }}" = "THEOS_PACKAGE_SCHEME=roothide" ]; then
             make package THEOS_PACKAGE_SCHEME=rootless
+            # Fix architecture tag for roothide: arm64 → arm64e
+            for deb in packages/*.deb; do
+              tmpdir=$(mktemp -d)
+              dpkg-deb -R "$deb" "$tmpdir"
+              sed -i '' 's/Architecture: iphoneos-arm64/Architecture: iphoneos-arm64e/' "$tmpdir/DEBIAN/control"
+              dpkg-deb -b "$tmpdir" "$deb"
+              rm -rf "$tmpdir"
+            done
           else
             make package ${{ matrix.scheme_var }}
           fi
