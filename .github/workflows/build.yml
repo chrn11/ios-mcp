@@ -36,13 +36,6 @@ jobs:
       - name: Install Theos
         uses: Randomblock1/theos-action@v1
 
-      - name: Patch Theos for roothide support
-        run: |
-          # Roothide uses same binary layout as rootless (/var/jb prefix)
-          # Create roothide module dir so Theos accepts the scheme
-          mkdir -p "$THEOS_MODULE_PATH/roothide"
-          echo "Patched Theos for roothide scheme support"
-
       - name: Install libroothide and libzip for Theos
         run: |
           set -e
@@ -50,6 +43,10 @@ jobs:
           THEOS_LIB="$THEOS/lib"
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
+          echo "=== Patching Theos for roothide scheme ==="
+          # Theos validates scheme by checking $THEOS/mod/<scheme> or $THEOS/vendor/<scheme> dirs exist
+          # Roothide uses same binary layout as rootless (/var/jb prefix)
+          mkdir -p "$THEOS/mod/roothide" "$THEOS/vendor/roothide" 2>/dev/null || true
           echo "=== Installing libroothide headers ==="
           mkdir -p "$THEOS_INC/roothide"
           mkdir -p "$THEOS_LIB"
