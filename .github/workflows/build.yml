@@ -44,8 +44,10 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
           echo "=== Patching Theos for roothide scheme ==="
-          # Theos validates scheme by checking $THEOS/mod/<scheme> or $THEOS/vendor/<scheme> dirs exist
           # Roothide uses same binary layout as rootless (/var/jb prefix)
+          # Copy rootless module dir to roothide so Theos accepts the scheme and provides link libs
+          if [ -d "$THEOS/mod/rootless" ]; then cp -a "$THEOS/mod/rootless" "$THEOS/mod/roothide"; fi
+          if [ -d "$THEOS/vendor/rootless" ]; then cp -a "$THEOS/vendor/rootless" "$THEOS/vendor/roothide"; fi
           mkdir -p "$THEOS/mod/roothide" "$THEOS/vendor/roothide" 2>/dev/null || true
           echo "=== Installing libroothide headers ==="
           mkdir -p "$THEOS_INC/roothide"
