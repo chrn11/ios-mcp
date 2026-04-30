@@ -49,8 +49,39 @@ NSString *MCPResolvedJailbreakPath(NSString *path) {
     // Try /var/jb prefix for roothide with stub
     NSString *varjbPath = [@"/var/jb" stringByAppendingString:path];
     if ([fm fileExistsAtPath:varjbPath]) return varjbPath;
+    // Try /var/usr prefix for roothide
+    if ([path hasPrefix:@"/usr/"]) {
+        NSString *varusrPath = [@"/var" stringByAppendingString:path];
+        if ([fm fileExistsAtPath:varusrPath]) return varusrPath;
+    }
+    // Try common iOS path prefixes for roothide
+    for (NSString *prefix in @[@"/var/jb", @"/usr/libexec", @"/usr/local", @"/var/usr", @"/private/preboot/jb"]) {
+        NSString *candidate = [prefix stringByAppendingString:path];
+        if ([fm fileExistsAtPath:candidate]) return candidate;
+    }
     // Last resort: return jbroot() result
     return resolved.length ? resolved : path;
+}
+
+NSString *MCPResolvedShellPath(void) {
+    // Shell paths to try in order of preference
+    NSArray<NSString *> *shellPaths = @[
+        @"/bin/sh",
+        @"/usr/bin/sh",
+        @"/var/jb/bin/sh",
+        @"/var/bin/sh",
+        @"/usr/libexec/sh",
+    ];
+    for (NSString *path in shellPaths) {
+        NSString *resolved = MCPResolvedJailbreakPath(path);
+        if (resolved.length > 0) {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            if ([fm fileExistsAtPath:resolved] && [fm isExecutableFileAtPath:resolved]) {
+                return resolved;
+            }
+        }
+    }
+    return MCPResolvedJailbreakPath(@"/bin/sh");
 }
 
 NSDictionary<NSString *, NSString *> *MCPJailbreakEnvironment(void) {

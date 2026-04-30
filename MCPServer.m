@@ -2232,7 +2232,7 @@ static NSDictionary *MCPRandomizedTapPointForElement(NSDictionary *element) {
     if (timeoutSec <= 0) timeoutSec = 10;
     if (timeoutSec > 30) timeoutSec = 30;
 
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     NSString *runError = nil;
     int exitCode = -1;
@@ -2566,7 +2566,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
     [cmdArgs addObject:@"--timeout"];
     [cmdArgs addObject:[NSString stringWithFormat:@"%.0f", durationSec]];
 
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     NSString *runError = nil;
     int exitCode = -1;
@@ -2638,7 +2638,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
     if (count <= 0) count = 10;
     if (count > 50) count = 50;
 
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     int exitCode = -1;
     NSString *runError = nil;
@@ -2761,12 +2761,63 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
     return [self mcpSuccess:reqId text:[NSString stringWithFormat:@"Tap failed: %@", err ?: @"timeout"] isError:YES];
 }
 
+// Helper for searching in both old and compact element formats
+- (NSString *)elementTextForNode:(NSDictionary *)node {
+    if (![node isKindOfClass:[NSDictionary class]]) return nil;
+    // Compact format: text key
+    NSString *text = [node[@"text"] isKindOfClass:[NSString class]] ? node[@"text"] : nil;
+    if (text.length > 0) return text;
+    // Old format: label, value, title
+    text = [node[@"label"] isKindOfClass:[NSString class]] ? node[@"label"] : nil;
+    if (text.length > 0) return text;
+    text = [node[@"title"] isKindOfClass:[NSString class]] ? node[@"title"] : nil;
+    if (text.length > 0) return text;
+    text = [node[@"value"] isKindOfClass:[NSString class]] ? node[@"value"] : nil;
+    if (text.length > 0) return text;
+    return nil;
+}
+
+// Helper to get identifiers from both formats
+- (NSString *)elementIdentifierForNode:(NSDictionary *)node {
+    if (![node isKindOfClass:[NSDictionary class]]) return nil;
+    // Compact format: id or path
+    NSString *ident = [node[@"id"] isKindOfClass:[NSString class]] ? node[@"id"] : nil;
+    if (ident.length > 0) return ident;
+    ident = [node[@"path"] isKindOfClass:[NSString class]] ? node[@"path"] : nil;
+    if (ident.length > 0) return ident;
+    // Old format: identifier
+    return [node[@"identifier"] isKindOfClass:[NSString class]] ? node[@"identifier"] : nil;
+}
+
 - (void)searchElementTree:(NSDictionary *)node forLabel:(NSString *)label identifier:(NSString *)identifier text:(NSString *)text matches:(NSMutableArray<NSDictionary *> *)matches {
     if (!node || ![node isKindOfClass:[NSDictionary class]]) return;
 
-    BOOL labelMatch = label.length == 0 || [node[@"label"] isEqualToString:label];
-    BOOL identifierMatch = identifier.length == 0 || [node[@"identifier"] isEqualToString:identifier];
-    BOOL textMatch = text.length == 0 || [node[@"label"] isEqualToString:text] || [node[@"value"] isEqualToString:text] || [node[@"title"] isEqualToString:text];
+    NSString *nodeText = [self elementTextForNode:node];
+    NSString *nodeIdent = [self elementIdentifierForNode:node];
+
+    BOOL labelMatch = label.length == 0 || [nodeText isEqualToString:label];
+    BOOL identifierMatch = identifier.length == 0 || [nodeIdent isEqualToString:identifier];
+    
+    // Text search: check main text, label, value, title, and aliases
+    BOOL textMatch = text.length == 0 || [nodeText isEqualToString:text];
+    if (!textMatch && text.length > 0) {
+        // Check aliases array (compact format)
+        NSArray *aliases = [node[@"aliases"] isKindOfClass:[NSArray class]] ? node[@"aliases"] : nil;
+        for (id alias in aliases) {
+            if ([alias isKindOfClass:[NSString class]] && [alias isEqualToString:text]) {
+                textMatch = YES;
+                break;
+            }
+        }
+        // Check old format value/title
+        if (!textMatch) {
+            NSString *value = [node[@"value"] isKindOfClass:[NSString class]] ? node[@"value"] : nil;
+            NSString *title = [node[@"title"] isKindOfClass:[NSString class]] ? node[@"title"] : nil;
+            if ([value isEqualToString:text] || [title isEqualToString:text]) {
+                textMatch = YES;
+            }
+        }
+    }
 
     if (labelMatch && identifierMatch && textMatch) {
         // At least one filter must be actively matching
@@ -2775,7 +2826,9 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
         }
     }
 
+    // Search both old format children and compact format elements
     NSArray *children = node[@"children"];
+    if (!children) children = node[@"elements"];
     for (NSDictionary *child in children) {
         [self searchElementTree:child forLabel:label identifier:identifier text:text matches:matches];
     }
@@ -2850,7 +2903,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
 #pragma mark - Respring Execution
 
 - (NSDictionary *)executeRespring:(id)reqId {
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     int exitCode = -1;
     NSString *runError = nil;
@@ -2906,7 +2959,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
         return [self mcpError:reqId code:-32602 message:paramError];
     }
 
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     int exitCode = -1;
     NSString *runError = nil;
@@ -2965,7 +3018,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
         return [self mcpError:reqId code:-32602 message:paramError];
     }
 
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     int exitCode = -1;
     NSString *runError = nil;
@@ -3026,7 +3079,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
         }
     }
 
-    NSString *shellPath = MCPResolvedJailbreakPath(@"/bin/sh");
+    NSString *shellPath = MCPResolvedShellPath();
     NSString *output = nil;
     int exitCode = -1;
     NSString *runError = nil;
