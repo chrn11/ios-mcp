@@ -2709,7 +2709,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
     __block NSString *treeError = nil;
     dispatch_semaphore_t treeSem = dispatch_semaphore_create(0);
 
-    [[AccessibilityManager sharedInstance] getUIElementsWithMaxDepth:20 maxElements:3000 completion:^(NSDictionary *result, NSString *error) {
+    [[AccessibilityManager sharedInstance] getCompactUIElementsWithMaxElements:1000 visibleOnly:NO clickableOnly:NO completion:^(NSDictionary *result, NSString *error) {
         tree = result;
         treeError = error;
         dispatch_semaphore_signal(treeSem);
@@ -2814,7 +2814,7 @@ static BOOL MCPSetSystemBrightness(CGFloat brightness) {
         __block NSString *treeError = nil;
         dispatch_semaphore_t treeSem = dispatch_semaphore_create(0);
 
-        [[AccessibilityManager sharedInstance] getUIElementsWithMaxDepth:10 maxElements:2000 completion:^(NSDictionary *result, NSString *error) {
+        [[AccessibilityManager sharedInstance] getCompactUIElementsWithMaxElements:500 visibleOnly:NO clickableOnly:NO completion:^(NSDictionary *result, NSString *error) {
             tree = result;
             treeError = error;
             dispatch_semaphore_signal(treeSem);
