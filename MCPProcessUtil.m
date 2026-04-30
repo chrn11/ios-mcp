@@ -64,21 +64,30 @@ NSString *MCPResolvedJailbreakPath(NSString *path) {
 }
 
 NSString *MCPResolvedShellPath(void) {
-    // Shell paths to try in order of preference
+    NSFileManager *fm = [NSFileManager defaultManager];
+    // Direct hardcoded paths for common jailbreak environments
+    NSArray<NSString *> *directPaths = @[
+        @"/var/jb/bin/sh",
+        @"/var/jb/usr/bin/sh",
+        @"/usr/bin/sh",
+        @"/bin/sh",
+        @"/private/preboot/jb/bin/sh",
+        @"/private/preboot/jb/usr/bin/sh",
+        @"/var/bin/sh",
+    ];
+    for (NSString *path in directPaths) {
+        if ([fm isExecutableFileAtPath:path]) return path;
+        if ([fm fileExistsAtPath:path]) return path; // fallback to existing even if not "executable" per NSFileManager
+    }
+    // Try via jbroot()
     NSArray<NSString *> *shellPaths = @[
         @"/bin/sh",
         @"/usr/bin/sh",
-        @"/var/jb/bin/sh",
-        @"/var/bin/sh",
-        @"/usr/libexec/sh",
     ];
     for (NSString *path in shellPaths) {
         NSString *resolved = MCPResolvedJailbreakPath(path);
-        if (resolved.length > 0) {
-            NSFileManager *fm = [NSFileManager defaultManager];
-            if ([fm fileExistsAtPath:resolved] && [fm isExecutableFileAtPath:resolved]) {
-                return resolved;
-            }
+        if (resolved.length > 0 && ([fm isExecutableFileAtPath:resolved] || [fm fileExistsAtPath:resolved])) {
+            return resolved;
         }
     }
     return MCPResolvedJailbreakPath(@"/bin/sh");
