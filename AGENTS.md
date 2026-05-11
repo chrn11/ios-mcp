@@ -820,7 +820,155 @@ docs: 更新 README 使用说明
 
 ---
 
-## 十二、最终要求
+## 十二、BigBoss 上架 / 更新流程
+
+### 1. 触发方式
+
+当用户输入以下任意内容时，进入“BigBoss 上架 / 更新”流程：
+
+```text
+发布到bigboss
+发布到 BigBoss
+上架到bigboss
+上架到 BigBoss
+提交到bigboss
+提交到 BigBoss
+更新bigboss
+更新 BigBoss
+```
+
+### 2. 基础规则
+
+BigBoss 是第三方仓库，提交后会进入 BigBoss 审核流程。该操作属于对外可见提交，必须先让用户确认。
+
+本项目 BigBoss 更新表单脚本固定使用：
+
+```text
+脚本：scripts/submit_bigboss_update.py
+Package Name：iOS MCP
+Your Name：witchan
+Email：witchan028@126.com
+```
+
+脚本运行时只传入：
+
+```text
+版本号
+Changes Made
+deb 路径
+```
+
+### 3. 用户确认内容
+
+触发 BigBoss 流程后，必须先让用户确认以下内容：
+
+```text
+准备提交到 BigBoss：
+
+版本号：
+1.1.0
+
+Changes Made：
+xxx
+
+rootful deb：
+packages/com.witchan.ios-mcp_1.1.0_iphoneos-arm.deb
+
+rootless deb：
+packages/com.witchan.ios-mcp_1.1.0_iphoneos-arm64.deb
+
+准备执行：
+
+python3 scripts/submit_bigboss_update.py \
+  --version 1.1.0 \
+  --changes "xxx" \
+  --response-out .codex-session-data/bigboss_update_1.1.0_rootful_response.html \
+  packages/com.witchan.ios-mcp_1.1.0_iphoneos-arm.deb \
+  --submit
+
+python3 scripts/submit_bigboss_update.py \
+  --version 1.1.0 \
+  --changes "xxx" \
+  --response-out .codex-session-data/bigboss_update_1.1.0_rootless_response.html \
+  packages/com.witchan.ios-mcp_1.1.0_iphoneos-arm64.deb \
+  --submit
+
+是否确认提交到 BigBoss 审核？
+```
+
+只有用户明确确认后，才能执行提交。
+
+### 4. deb 文件规则
+
+默认只提交 BigBoss 支持的两个包：
+
+```text
+rootful：packages/com.witchan.ios-mcp_版本号_iphoneos-arm.deb
+rootless：packages/com.witchan.ios-mcp_版本号_iphoneos-arm64.deb
+```
+
+不要默认提交 roothide 包：
+
+```text
+packages/com.witchan.ios-mcp_版本号_iphoneos-arm64e.deb
+```
+
+除非用户明确要求，否则 BigBoss 流程不上传 roothide。
+
+### 5. 执行前检查
+
+用户确认后，执行前必须检查：
+
+```bash
+git status --short --branch
+ls -l packages/com.witchan.ios-mcp_版本号_iphoneos-arm.deb
+ls -l packages/com.witchan.ios-mcp_版本号_iphoneos-arm64.deb
+python3 scripts/submit_bigboss_update.py --help
+```
+
+如果任一 deb 不存在，必须停止并提示用户先构建正式包，不允许提交旧版本或错误路径的包。
+
+### 6. 执行提交
+
+确认无误后，依次提交：
+
+```bash
+python3 scripts/submit_bigboss_update.py \
+  --version 版本号 \
+  --changes "用户确认后的 Changes Made" \
+  --response-out .codex-session-data/bigboss_update_版本号_rootful_response.html \
+  packages/com.witchan.ios-mcp_版本号_iphoneos-arm.deb \
+  --submit
+
+python3 scripts/submit_bigboss_update.py \
+  --version 版本号 \
+  --changes "用户确认后的 Changes Made" \
+  --response-out .codex-session-data/bigboss_update_版本号_rootless_response.html \
+  packages/com.witchan.ios-mcp_版本号_iphoneos-arm64.deb \
+  --submit
+```
+
+如果第一条已成功、第二条失败，必须明确告诉用户 BigBoss 可能已经收到 rootful 提交，当前处于部分提交状态。不要自动重复提交成功的包，除非用户明确确认重试。
+
+### 7. 完成后的输出格式
+
+提交完成后输出：
+
+```text
+BigBoss 提交完成：
+
+版本：1.1.0
+rootful：已提交
+rootless：已提交
+审核状态：等待 BigBoss 审核
+响应记录：
+.codex-session-data/bigboss_update_1.1.0_rootful_response.html
+.codex-session-data/bigboss_update_1.1.0_rootless_response.html
+```
+
+---
+
+## 十三、最终要求
 
 Codex 必须始终遵守以下要求：
 
@@ -834,3 +982,4 @@ Codex 必须始终遵守以下要求：
 8. 发布完成后必须合并 release 分支到 main。
 9. 发布完成后必须保留 release 分支。
 10. 未经用户确认，不允许提交、推送、打 tag、创建 GitHub Release。
+11. 未经用户确认，不允许提交 BigBoss 更新表单。
