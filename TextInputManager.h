@@ -4,13 +4,13 @@
 
 + (instancetype)sharedInstance;
 
-/// Bulk text input via pasteboard (fast, replaces clipboard content)
+/// Bulk text input through system keyboard events
 - (void)inputText:(NSString *)text completion:(void (^)(BOOL success, NSString *error))completion;
 
-/// Character-by-character HID keyboard simulation
+/// Character-by-character text input, with HID fallback for ASCII
 - (void)typeText:(NSString *)text delayMs:(NSTimeInterval)delayMs completion:(void (^)(BOOL success, NSString *error))completion;
 
-/// Press a special key (enter, tab, escape, delete, backspace, space, up, down, left, right)
+/// Press a special key (enter, tab, delete, backspace, space, up, down, left, right)
 - (void)pressKey:(NSString *)keyName completion:(void (^)(BOOL success, NSString *error))completion;
 
 @end

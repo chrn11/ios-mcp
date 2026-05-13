@@ -27,6 +27,19 @@ enum {
     kIOHIDEventTypeVendorDefined       = 1,
     kIOHIDEventTypeKeyboard            = 3,
     kIOHIDEventTypeDigitizer           = 11,
+    kIOHIDEventTypeUnicode             = 30,
+};
+
+// ============================================================
+// IOHID Unicode event encodings
+// ============================================================
+
+enum {
+    kIOHIDUnicodeEncodingTypeUTF8     = 0,
+    kIOHIDUnicodeEncodingTypeUTF16LE  = 1,
+    kIOHIDUnicodeEncodingTypeUTF16BE  = 2,
+    kIOHIDUnicodeEncodingTypeUTF32LE  = 3,
+    kIOHIDUnicodeEncodingTypeUTF32BE  = 4,
 };
 
 // ============================================================
@@ -176,6 +189,25 @@ IOHIDEventRef IOHIDEventCreateDigitizerFingerEvent(
     IOHIDFloat     twist,
     Boolean        range,
     Boolean        touch,
+    IOOptionBits   options
+);
+
+IOHIDEventRef IOHIDEventCreateUnicodeEvent(
+    CFAllocatorRef allocator,
+    uint64_t       timeStamp,
+    const uint8_t *payload,
+    uint32_t       length,
+    uint32_t       encoding,
+    IOOptionBits   options
+);
+
+IOHIDEventRef IOHIDEventCreateUnicodeEventWithQuality(
+    CFAllocatorRef allocator,
+    uint64_t       timeStamp,
+    const uint8_t *payload,
+    uint32_t       length,
+    uint32_t       encoding,
+    IOHIDFloat     quality,
     IOOptionBits   options
 );
 
